@@ -5,6 +5,8 @@
  */
 require('dotenv').config();
 
+process.env.USE_ML = '0';
+
 const db = require('./lib/db');
 const { createUser, getUserByEmail } = require('./lib/auth');
 const { analyzeTranscript } = require('./lib/analyzePipeline');
