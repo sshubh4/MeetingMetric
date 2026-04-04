@@ -865,4 +865,7 @@ app.get('/health', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`MeetingMetric API http://localhost:${PORT}`);
+
+  const seedDemo = require('./seed');
+  seedDemo().catch((e) => console.error('Auto-seed failed:', e.message));
 });

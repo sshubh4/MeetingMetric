@@ -179,7 +179,7 @@ async function main() {
     '#2B80FF'
   );
 
-  const projectFor = (i) => (i === 2 ? p2.id : p1.id);
+  const projectFor = (i) => (i === 2 ? p2 : p1);
 
   for (let i = 0; i < TRANSCRIPTS.length; i++) {
     const t = TRANSCRIPTS[i];
@@ -191,7 +191,11 @@ async function main() {
   console.log(`\nDone. Login with:\n  Email: ${DEMO_EMAIL}\n  Password: ${DEMO_PASSWORD}`);
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+module.exports = main;
+
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
