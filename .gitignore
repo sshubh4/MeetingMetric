@@ -1,0 +1,8 @@
+node_modules/
+website/backend/node_modules/
+website/pdf-upload-app/node_modules/
+website/backend/data/
+*.db
+.DS_Store
+.env
+.env.local
