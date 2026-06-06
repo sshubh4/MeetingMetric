@@ -22,8 +22,32 @@ const app = express();
 const PORT = process.env.PORT || 5200;
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 
+// Allow one or more comma-separated origins via CORS_ORIGIN.
+// Each entry is either an exact origin (https://app.vercel.app) or a wildcard
+// suffix (*.vercel.app, useful for Vercel preview deployments). Requests with
+// no Origin header (curl, server-to-server, same-origin) are always allowed.
+const CORS_RULES = (process.env.CORS_ORIGIN || 'http://localhost:3000')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  return CORS_RULES.some((rule) => {
+    if (rule === '*') return true;
+    if (rule.startsWith('*.')) {
+      try {
+        return new URL(origin).hostname.endsWith(rule.slice(1));
+      } catch {
+        return false;
+      }
+    }
+    return rule === origin;
+  });
+}
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  origin: (origin, cb) => cb(null, isOriginAllowed(origin)),
   credentials: true,
 }));
 app.use(express.json({ limit: '5mb' }));

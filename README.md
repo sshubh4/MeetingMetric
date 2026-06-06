@@ -143,21 +143,11 @@ This transforms MeetingMetric from a manual import tool into an **always-on, zer
 
 ---
 
-## Deploy online → meetingmetric.github.io
+## Deploy online (Vercel frontend + Render backend)
 
-### Step 1: Create the GitHub Organization
+The **frontend** (React) is hosted on **Vercel**; the **backend** (Node API) runs on **Render**. They talk over HTTPS, locked down by CORS.
 
-1. Go to **github.com** → avatar → **Settings** → **Organizations** → **New organization** (Free tier)
-2. Name it **`meetingmetric`**
-3. Create a repo called **`meetingmetric.github.io`** in the org
-4. Add the new remote and push:
-   ```bash
-   git remote add live https://github.com/meetingmetric/meetingmetric.github.io.git
-   git push live main
-   ```
-5. In the repo, go to **Settings → Pages** → Source: **GitHub Actions**
-
-### Step 2: Deploy the backend to Render
+### Step 1: Deploy the backend to Render
 
 1. Sign up at [render.com](https://render.com) (free tier works for portfolio)
 2. **New → Web Service** → connect your GitHub repo
@@ -169,9 +159,9 @@ This transforms MeetingMetric from a manual import tool into an **always-on, zer
 
 | Variable | Value |
 |----------|-------|
-| `JWT_SECRET` | A strong random string (`openssl rand -hex 32`) |
-| `CORS_ORIGIN` | `https://meetingmetric.github.io` |
-| `FRONTEND_URL` | `https://meetingmetric.github.io` |
+| `JWT_SECRET` | A strong random string (`openssl rand -hex 32`) — **required** |
+| `CORS_ORIGIN` | Your Vercel origin, e.g. `https://meetingmetric.vercel.app` (set this **after** Step 2). Supports a comma-separated list and `*.vercel.app` for preview URLs |
+| `FRONTEND_URL` | Same Vercel origin (used for the Teams OAuth redirect) |
 | `ANTHROPIC_API_KEY` | Your Claude API key (for AI scoring + coaching) |
 | `USE_ML` | `0` (skip local models — use Claude instead) |
 | `AZURE_CLIENT_ID` | *(from Azure AD — optional for Teams)* |
@@ -180,26 +170,31 @@ This transforms MeetingMetric from a manual import tool into an **always-on, zer
 
 Note your Render URL (e.g. `https://meetingmetric-api.onrender.com`).
 
-### Step 3: Connect frontend to backend
+> **Persistence note:** Render's free tier has an **ephemeral filesystem** — the SQLite DB and uploads are wiped on every restart/redeploy. For data that survives, attach a Render **persistent disk** mounted where `MEETINGMETRIC_DB` points (and the `uploads/` dir), or migrate to a hosted Postgres.
 
-1. In the **`meetingmetric.github.io`** repo, go to **Settings → Secrets and variables → Actions**
-2. Add secret: **`API_URL`** = your Render URL (e.g. `https://meetingmetric-api.onrender.com`)
-3. Push to `main` — GitHub Actions builds the React app with `REACT_APP_API_URL` and deploys to Pages automatically
-4. Visit **https://meetingmetric.github.io** — your app is live!
+### Step 2: Deploy the frontend to Vercel
+
+1. Sign up at [vercel.com](https://vercel.com) and **Add New → Project** → import the `MeetingMetric` repo
+2. **Root Directory**: `website/pdf-upload-app` (click *Edit* and select it — this is a monorepo subfolder)
+3. **Framework Preset**: Create React App (auto-detected). Build command `npm run build`, output `build/`
+4. **Environment Variable**: add `REACT_APP_API_URL` = your Render URL (e.g. `https://meetingmetric-api.onrender.com`)
+5. **Deploy.** Vercel gives you a URL like `https://meetingmetric.vercel.app`
+6. Go back to Render and set `CORS_ORIGIN` / `FRONTEND_URL` to that Vercel URL, then redeploy the backend
+
+SPA deep links are handled by `vercel.json` (rewrites all paths to `index.html`).
 
 ### How it works
 
-- **Frontend** (React) is hosted on GitHub Pages as static files at `meetingmetric.github.io`
+- **Frontend** (React) is served by Vercel at your `.vercel.app` URL (or a custom domain)
 - **Backend** (Node.js API) runs on Render at your `.onrender.com` URL
-- The frontend makes API calls to the Render backend using `REACT_APP_API_URL` (baked in at build time)
-- CORS is configured to only accept requests from `meetingmetric.github.io`
-- SPA routing is handled by `404.html` which redirects deep links back to `index.html`
+- The frontend calls the backend using `REACT_APP_API_URL`, **baked in at build time** — changing it requires a redeploy
+- CORS only accepts the origin(s) in `CORS_ORIGIN`
 
 ### Redeploying
 
-- **Frontend**: just push to `main` — GitHub Actions auto-deploys
+- **Frontend**: push to `main` — Vercel auto-deploys (and builds a preview for every PR)
 - **Backend**: Render auto-deploys on push (if connected to the repo)
-- **Both**: pushing to `main` triggers both deployments simultaneously
+- Changed `REACT_APP_API_URL`? Trigger a fresh Vercel build so the new value is baked in
 
 ---
 

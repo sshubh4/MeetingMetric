@@ -2,7 +2,17 @@ node_modules/
 website/backend/node_modules/
 website/pdf-upload-app/node_modules/
 website/backend/data/
+website/backend/uploads/
 *.db
 .DS_Store
 .env
 .env.local
+
+# build output (Vercel/CRA build locally; not committed)
+build/
+website/pdf-upload-app/build/
+
+# editor / IDE
+.idea/
+*.iml
+.vercel/
