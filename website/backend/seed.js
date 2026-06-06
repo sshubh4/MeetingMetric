@@ -5,7 +5,9 @@
  */
 require('dotenv').config();
 
-process.env.USE_ML = '0';
+// USE_ML is intentionally NOT forced to '0' here so seeded meetings
+// get chunk embeddings and the Intelligence / semantic-search page has
+// demo data to search against. Set USE_ML=0 in your env to skip models.
 
 const db = require('./lib/db');
 const { createUser, getUserByEmail } = require('./lib/auth');

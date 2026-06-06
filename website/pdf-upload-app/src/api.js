@@ -100,6 +100,11 @@ export async function getProjectDetail(id) {
   return data;
 }
 
+export async function getReports(params = {}) {
+  const { data } = await api.get('/api/reports', { params });
+  return data;
+}
+
 export async function getTeamsStatus() {
   const { data } = await api.get('/api/teams/status');
   return data;

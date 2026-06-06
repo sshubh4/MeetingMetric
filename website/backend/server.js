@@ -859,6 +859,136 @@ app.post('/api/bot/transcript', async (req, res) => {
   }
 });
 
+app.get('/api/reports', authMiddleware, (req, res) => {
+  try {
+    const { from, to } = req.query;
+
+    let meetingFilter = 'WHERE m.user_id = ?';
+    const params = [req.user.id];
+    if (from) { meetingFilter += ' AND date(COALESCE(m.scheduled_at, m.created_at)) >= ?'; params.push(from); }
+    if (to)   { meetingFilter += ' AND date(COALESCE(m.scheduled_at, m.created_at)) <= ?'; params.push(to); }
+
+    const meetings = db.prepare(`
+      SELECT m.id, m.title, m.efficiency_score, m.created_at, m.scheduled_at,
+             p.name AS project_name, p.color AS project_color
+      FROM meetings m LEFT JOIN projects p ON p.id = m.project_id
+      ${meetingFilter}
+      ORDER BY COALESCE(m.scheduled_at, m.created_at) ASC
+    `).all(...params);
+
+    const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+
+    // Per-meeting dimension averages for trend chart
+    const dimensionTrends = meetings.map((m) => {
+      const sRows = db.prepare('SELECT scores_json FROM speaker_results WHERE meeting_id = ?').all(m.id);
+      const sc = (key) => sRows.length
+        ? avg(sRows.map((r) => { try { return JSON.parse(r.scores_json)[key] ?? 0; } catch { return 0; } }))
+        : 0;
+      return {
+        id: m.id,
+        title: m.title,
+        date: (m.scheduled_at || m.created_at).slice(0, 10),
+        efficiency: Math.round((m.efficiency_score ?? 0) * 100),
+        engagement:    Math.round(sc('engagement')    * 100),
+        sentiment:     Math.round(sc('sentiment')     * 100),
+        collaboration: Math.round(sc('collaboration') * 100),
+        initiative:    Math.round(sc('initiative')    * 100),
+        clarity:       Math.round(sc('clarity')       * 100),
+      };
+    });
+
+    // Participant aggregation
+    const speakerRows = db.prepare(`
+      SELECT sr.speaker_name, sr.scores_json, sr.talk_ratio
+      FROM speaker_results sr
+      JOIN meetings m ON m.id = sr.meeting_id
+      ${meetingFilter}
+    `).all(...params);
+
+    const byName = new Map();
+    for (const r of speakerRows) {
+      if (!byName.has(r.speaker_name)) byName.set(r.speaker_name, { name: r.speaker_name, rows: [] });
+      byName.get(r.speaker_name).rows.push(r);
+    }
+
+    const participants = [];
+    for (const [, v] of byName) {
+      const scores = v.rows.map((r) => { try { return JSON.parse(r.scores_json); } catch { return {}; } });
+      participants.push({
+        name:              v.name,
+        meeting_count:     v.rows.length,
+        avg_engagement:    Math.round(avg(scores.map((s) => s.engagement    ?? 0)) * 100) / 100,
+        avg_sentiment:     Math.round(avg(scores.map((s) => s.sentiment     ?? 0)) * 100) / 100,
+        avg_collaboration: Math.round(avg(scores.map((s) => s.collaboration ?? 0)) * 100) / 100,
+        avg_initiative:    Math.round(avg(scores.map((s) => s.initiative    ?? 0)) * 100) / 100,
+        avg_clarity:       Math.round(avg(scores.map((s) => s.clarity       ?? 0)) * 100) / 100,
+        avg_talk_ratio:    Math.round(avg(v.rows.map((r) => r.talk_ratio    ?? 0)) * 100) / 100,
+      });
+    }
+    participants.sort((a, b) => b.avg_engagement - a.avg_engagement);
+
+    // Top / bottom meetings by efficiency
+    const ranked = [...meetings]
+      .filter((m) => m.efficiency_score != null)
+      .sort((a, b) => b.efficiency_score - a.efficiency_score);
+
+    const fmt = (m) => ({
+      id: m.id,
+      title: m.title,
+      efficiency: Math.round(m.efficiency_score * 100),
+      date: (m.scheduled_at || m.created_at).slice(0, 10),
+      project_name: m.project_name || null,
+    });
+
+    const topMeetings    = ranked.slice(0, 5).map(fmt);
+    const bottomMeetings = ranked.length > 5 ? ranked.slice(-5).reverse().map(fmt) : [];
+
+    // Project breakdown
+    const projectMap = new Map();
+    for (const m of meetings) {
+      const key = m.project_name || 'Unassigned';
+      if (!projectMap.has(key)) projectMap.set(key, { name: key, color: m.project_color || '#6b7280', meetings: [] });
+      projectMap.get(key).meetings.push(m);
+    }
+    const projectBreakdown = [];
+    for (const [, pv] of projectMap) {
+      const eff = pv.meetings.filter((m) => m.efficiency_score != null).map((m) => m.efficiency_score);
+      const pSpeakers = pv.meetings.flatMap((m) =>
+        db.prepare('SELECT scores_json FROM speaker_results WHERE meeting_id = ?').all(m.id)
+      );
+      const eng = pSpeakers.map((s) => { try { return JSON.parse(s.scores_json).engagement ?? 0; } catch { return 0; } });
+      projectBreakdown.push({
+        name:            pv.name,
+        color:           pv.color,
+        meeting_count:   pv.meetings.length,
+        avg_efficiency:  eff.length  ? Math.round(avg(eff)  * 100) : null,
+        avg_engagement:  eng.length  ? Math.round(avg(eng)  * 100) : null,
+      });
+    }
+
+    const allEff = meetings.filter((m) => m.efficiency_score != null).map((m) => m.efficiency_score);
+    res.json({
+      summary: {
+        totalMeetings:    meetings.length,
+        avgEfficiency:    allEff.length ? Math.round(avg(allEff) * 100) : null,
+        totalParticipants: byName.size,
+        dateRange:        meetings.length ? {
+          from: (meetings[0].scheduled_at    || meetings[0].created_at).slice(0, 10),
+          to:   (meetings[meetings.length - 1].scheduled_at || meetings[meetings.length - 1].created_at).slice(0, 10),
+        } : null,
+      },
+      dimensionTrends,
+      topParticipants:    participants.slice(0, 5),
+      bottomParticipants: participants.length > 5 ? participants.slice(-5).reverse() : [],
+      topMeetings,
+      bottomMeetings,
+      projectBreakdown,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/health', (req, res) => {
   res.json({ ok: true, teams: teams.isConfigured() });
 });
