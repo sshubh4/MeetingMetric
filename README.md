@@ -1,207 +1,166 @@
 # MeetingMetric
 
-AI meeting productivity tool for HR teams: **transcript → structured contribution metrics**, coaching, **Executive Suite** navigation (overview, calendar, projects), and semantic search.
+Turn a meeting transcript into per-speaker contribution metrics, an efficiency score, an executive summary, and coaching — for HR and team-effectiveness use.
 
-## Features
+![CI](https://github.com/sshubh4/MeetingMetric/actions/workflows/ci.yml/badge.svg)
 
-- **Executive Suite UI** — sidebar: Overview, Calendar, Projects, Analyze, Intelligence (search), Reports, Archive, Settings
-- **Auth** — register, login (JWT), protected routes
-- **Projects** — create projects and tag analyses; meetings show project on detail + archive
-- **Calendar** — month view of meetings (uses **scheduled date** from Analyze, or analyzed-at time)
-- **Analyze** — meeting title, optional project, **datetime** for calendar, paste transcript, drag-and-drop upload
-- **Scores** — engagement, sentiment, collaboration, initiative, clarity (0–1)
-- **Structure** — talk ratio, turns, utterance breakdown (ideas / questions / decisions / filler)
-- **Meeting detail** — efficiency gauge, executive summary, coaching panel, participant cards with radar charts
-- **Dashboard** — efficiency trend, **last-30-day stats** (meetings, avg efficiency, participation index, unique participants), alerts
-- **Archive** — sortable table of all meetings
-- **Search** — semantic search over indexed chunks (requires `USE_ML` for embeddings)
+**Live demo:** _deploying to Vercel — URL coming soon_
+**Architecture:** [docs/architecture.md](docs/architecture.md)
+
+<!-- Add a screenshot at docs/screenshots/dashboard.png and reference it here:
+![Dashboard](docs/screenshots/dashboard.png) -->
+
+---
+
+## What it does
+
+Paste or upload a transcript (`Speaker: text`, plain text, or PDF) and MeetingMetric returns:
+
+- **Per-speaker scores** — engagement, sentiment, collaboration, initiative, clarity (0–1)
+- **Conversation structure** — talk ratio, turn count, and an utterance mix (ideas / questions / decisions / filler)
+- **Meeting efficiency index** — a 0–100 score that penalises a dominant speaker and rewards decision density
+- **Executive summary + coaching** — a short summary and per-speaker coaching notes
+- **Dashboards & history** — efficiency trends, last-30-day stats, alerts, and a searchable meeting archive
+- **Semantic search** — find moments across past meetings by meaning (requires `USE_ML=1`)
+
+### App sections (sidebar)
+
+`Dashboard` · `Analyze` · `Meetings` · `Intelligence` (semantic search) · `Reports` · `Team` · `Projects` · `Calendar` · `Settings`
+
+## How scoring works (three-tier cascade)
+
+Scoring degrades gracefully based on what you configure — the first available tier is used:
+
+1. **Claude** (`ANTHROPIC_API_KEY` set) — Sonnet does 5-dimension scoring and tailored coaching. Highest quality.
+2. **Transformers.js** (`USE_ML=1`) — local MiniLM embeddings + zero-shot classification. No API; downloads models on first run.
+3. **Heuristic** (`USE_ML=0`) — deterministic talk-ratio math and keyword classification. Always available, zero dependencies, and what the test suite runs against.
+
+Full details, diagrams, and the DB schema are in [docs/architecture.md](docs/architecture.md).
+
+## Tech stack
+
+| Layer | Tech |
+|-------|------|
+| Frontend | React 18, React Router 6, Recharts, Axios (Create React App) |
+| Backend | Node 22+, Express, `node:sqlite`, Multer, pdf-parse |
+| Auth | bcryptjs + JWT |
+| AI | Anthropic SDK · `@xenova/transformers` · heuristic fallback |
+| Integrations | `@azure/msal-node` + Microsoft Graph |
+| Tests / CI | `node:test` · GitHub Actions |
+| Hosting | Vercel (client) · Render (server) |
+
+## Project structure
+
+```
+MeetingMetric/
+├── client/                 # React SPA (Vercel)
+│   ├── src/
+│   │   ├── components/      # pages + UI
+│   │   └── api.js           # API client (uses REACT_APP_API_URL)
+│   └── vercel.json          # SPA rewrites
+├── server/                  # Express API (Render)
+│   ├── src/
+│   │   ├── lib/             # auth, db, segment, metrics, classify, embeddings, teams, analyzePipeline
+│   │   └── server.js
+│   ├── test/                # node:test suites
+│   ├── seed.js              # demo user + sample transcripts
+│   └── .env.example
+├── docs/
+│   ├── architecture.md
+│   └── screenshots/
+└── .github/workflows/ci.yml
+```
 
 ## Requirements
 
-- **Node.js 22+** (uses built-in [`node:sqlite`](https://nodejs.org/api/sqlite.html))
-- Two terminals for local development
+- **Node.js 22+** (the backend uses the built-in [`node:sqlite`](https://nodejs.org/api/sqlite.html))
 
-## Run locally
+## Local development
 
-**1. Backend** (API + SQLite DB):
+Run the API and the client in two terminals.
 
+**1. Backend**
 ```bash
-cd website/backend
+cd server
+cp .env.example .env      # fill in secrets — or leave defaults for heuristic mode
 npm install
-npm start
+npm start                 # http://localhost:5200
 ```
 
-Default: `http://localhost:5200`. Optional env:
-
-| Variable | Meaning |
-|----------|---------|
-| `ANTHROPIC_API_KEY` | **Claude AI** — best quality scoring + AI coaching (recommended) |
-| `USE_ML=0` | Fast **heuristic** scoring only (no model download, no API) |
-| `USE_ML=1` or unset | **Transformers.js** zero-shot + embeddings (first run downloads models) |
-| `JWT_SECRET` | Secret for production |
-| `PORT` | API port (default `5200`) |
-| `MEETINGMETRIC_DB` | Path to SQLite file |
-
-**AI priority:** `ANTHROPIC_API_KEY` (Claude) → Transformers.js (`USE_ML`) → heuristic fallback. When Claude is configured, scoring uses Claude Sonnet for 5-dimension analysis and personalized coaching per speaker.
-
-**2. Frontend (React)**
-
+**2. Frontend**
 ```bash
-cd website/pdf-upload-app
+cd client
 npm install
-npm start
+npm start                 # http://localhost:3000  (proxies /api to :5200)
 ```
 
-Opens `http://localhost:3000` with a **proxy** to the API on port 5200.
-
-### Demo data (optional)
-
-Seed a **dummy user** and **three realistic multi-speaker transcripts** (projects + calendar dates):
+### Seed demo data (optional)
 
 ```bash
-cd website/backend
+cd server
 npm run seed
 ```
 
-Then sign in on the app:
+Then sign in with:
 
 | Field | Value |
-|-------|--------|
-| **Email** | `demo@meetingmetric.local` |
-| **Password** | `Demo123!` |
+|-------|-------|
+| Email | `demo@meetingmetric.local` |
+| Password | `Demo123!` |
 
-If the user already has meetings, the seed script skips inserts (delete `website/backend/data/meetingmetric.db` to start fresh).
+The seed adds three multi-speaker transcripts across two projects with calendar dates. The backend also auto-seeds this account on first startup against an empty database.
 
-**Brand:** Logo and UI accents use **cyan → blue** (`#55E7FC` → `#2B80FF`) on **`#0B0E14`** background — see `website/pdf-upload-app/public/brand-logo.png`.
+### Tests
 
-**Production build** (serve `build/` from any static host; set `REACT_APP_API_URL` to your API origin if not same-origin).
+```bash
+cd server
+npm test                  # node:test — scoring pipeline + auth
+```
 
-## Architecture (high level)
+## Environment variables
 
-- **Backend**: Node `express` — auth, `POST /api/meetings/analyze` (multipart: `title`, `text`, `file`, `project_id`, `scheduled_at`), `GET /api/meetings`, `GET /api/meetings/:id`, `GET /api/dashboard`, `GET /api/calendar?month=YYYY-MM`, `GET/POST /api/projects`, `POST /api/search`, Teams integration routes (`/api/teams/*`)
-- **DB**: SQLite (`website/backend/data/meetingmetric.db` by default); migrations add `project_id` and `scheduled_at` on `meetings`; `teams_tokens` table for OAuth tokens
-- **ML**: `@xenova/transformers` — zero-shot + MiniLM embeddings when `USE_ML` is on
-- **Teams**: `@azure/msal-node` — OAuth2 authorization code flow with Microsoft Graph API
+See [`server/.env.example`](server/.env.example) for the full list. The essentials:
 
----
+| Variable | Meaning |
+|----------|---------|
+| `JWT_SECRET` | Token signing secret — **required in production** (`openssl rand -hex 32`) |
+| `CORS_ORIGIN` | Allowed browser origin(s); comma-separated, supports `*.vercel.app` |
+| `ANTHROPIC_API_KEY` | Enables Claude scoring + coaching (Tier 1) |
+| `USE_ML` | `1` = local Transformers.js models (Tier 2); `0` = heuristic only (Tier 3) |
+| `PORT` | API port (default `5200`) |
+| `MEETINGMETRIC_DB` | Path to the SQLite file (default `server/data/meetingmetric.db`) |
 
-## Microsoft Teams Integration (Level 2)
+## Deployment
 
-Connect your Microsoft account to import meeting transcripts directly from Teams.
+**Backend → Render**
+1. **New → Web Service**, connect the repo, **Root Directory:** `server`
+2. Build: `npm install` · Start: `npm start` · Node `22`
+3. Set env vars: `JWT_SECRET`, `ANTHROPIC_API_KEY`, `USE_ML=0`, and `CORS_ORIGIN` / `FRONTEND_URL` = your Vercel URL
 
-### Azure AD app registration
+**Frontend → Vercel**
+1. **Add New → Project**, import the repo, **Root Directory:** `client`
+2. Framework preset: Create React App (auto-detected)
+3. Env var: `REACT_APP_API_URL` = your Render URL (baked in at build time)
+4. Deploy, then set Render's `CORS_ORIGIN` to the Vercel URL and redeploy the backend
 
-1. Go to **[portal.azure.com](https://portal.azure.com)** → **Azure Active Directory** → **App registrations** → **New registration**
-2. **Name**: `MeetingMetric`
-3. **Supported account types**: Accounts in any organizational directory and personal Microsoft accounts
-4. **Redirect URI**: Select **Web** and enter:
-   - Development: `http://localhost:5200/api/teams/callback`
-   - Production: `https://<your-api-host>/api/teams/callback`
-5. After creation, copy the **Application (client) ID**
-6. Go to **Certificates & secrets** → **New client secret** → copy the **Value**
-7. Go to **API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated permissions**, add:
-   - `User.Read`
-   - `Calendars.Read`
-   - `OnlineMeetings.Read`
-   - `OnlineMeetingTranscript.Read.All`
-8. Click **Grant admin consent** (or have your tenant admin do it)
+> **Persistence:** Render's free tier has an ephemeral filesystem — the SQLite DB and uploads are wiped on restart. For durable data, attach a persistent disk (point `MEETINGMETRIC_DB` at it) or migrate to a hosted Postgres.
 
-### Environment variables
+## Microsoft Teams integration (optional)
 
-Add these to the backend (`.env` or hosting dashboard):
+Import meeting transcripts directly from Teams via Microsoft Graph (read-only, delegated).
 
-| Variable | Value |
-|----------|-------|
-| `AZURE_CLIENT_ID` | Application (client) ID from step 5 |
-| `AZURE_CLIENT_SECRET` | Client secret value from step 6 |
-| `AZURE_REDIRECT_URI` | `http://localhost:5200/api/teams/callback` (dev) |
-| `FRONTEND_URL` | `http://localhost:3000` (dev) — where the OAuth callback redirects |
+1. **[portal.azure.com](https://portal.azure.com)** → **App registrations** → **New registration**
+2. Redirect URI (Web): `http://localhost:5200/api/teams/callback` (dev) / `https://<your-api-host>/api/teams/callback` (prod)
+3. **Certificates & secrets** → new client secret
+4. **API permissions** → Microsoft Graph → Delegated: `User.Read`, `Calendars.Read`, `OnlineMeetings.Read`, `OnlineMeetingTranscript.Read.All`
+5. Set `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_REDIRECT_URI`, `FRONTEND_URL` on the backend
 
-### How it works
+Flow: connect → Microsoft consent → token stored per-user → list online meetings → import a `.vtt` transcript → it runs through the standard analyze pipeline. Details in [docs/architecture.md](docs/architecture.md#5-microsoft-teams-oauth-flow-optional).
 
-1. User clicks **Connect with Microsoft** on the Teams page
-2. They're redirected to Microsoft's login, consent to read-only meeting access
-3. The backend exchanges the auth code for an access token, stores it in `teams_tokens`
-4. The Teams page lists recent online meetings via the Graph API
-5. Clicking **Import & Analyze** fetches the `.vtt` transcript, parses it to `Speaker: text` format, and runs the full analysis pipeline
+## Roadmap — not built
 
----
-
-## Roadmap: Teams Bot (Level 3)
-
-> **Not built — documented here as an interview talking point for the enterprise vision.**
-
-The next evolution is a **Teams meeting bot** that joins meetings automatically and captures transcripts in real time:
-
-- **Bot Framework + Azure Communications Services** — register a Teams app with a bot that auto-joins scheduled meetings
-- **Live transcription** — the bot captures meeting audio, pipes it to **Azure Speech-to-Text** (or Whisper) for real-time speaker-diarized transcription
-- **Automatic analysis** — when the meeting ends, the bot triggers `analyzeTranscript()` with zero manual intervention; results appear in the dashboard immediately
-- **Tech requirements**: Azure Bot Service registration, Teams app manifest (with `media` permissions), RSC (Resource-Specific Consent) for auto-join
-- **Privacy**: Participants see a bot icon in the meeting; consent is transparent; recordings follow org policy
-
-This transforms MeetingMetric from a manual import tool into an **always-on, zero-touch meeting intelligence platform** — the enterprise-grade vision.
-
----
-
-## Deploy online (Vercel frontend + Render backend)
-
-The **frontend** (React) is hosted on **Vercel**; the **backend** (Node API) runs on **Render**. They talk over HTTPS, locked down by CORS.
-
-### Step 1: Deploy the backend to Render
-
-1. Sign up at [render.com](https://render.com) (free tier works for portfolio)
-2. **New → Web Service** → connect your GitHub repo
-3. **Root directory**: `website/backend`
-4. **Build command**: `npm install`
-5. **Start command**: `node server.js`
-6. **Node version**: Set to `22` in Render's environment (or add `.node-version` file with `22`)
-7. **Environment variables** (add in Render dashboard):
-
-| Variable | Value |
-|----------|-------|
-| `JWT_SECRET` | A strong random string (`openssl rand -hex 32`) — **required** |
-| `CORS_ORIGIN` | Your Vercel origin, e.g. `https://meetingmetric.vercel.app` (set this **after** Step 2). Supports a comma-separated list and `*.vercel.app` for preview URLs |
-| `FRONTEND_URL` | Same Vercel origin (used for the Teams OAuth redirect) |
-| `ANTHROPIC_API_KEY` | Your Claude API key (for AI scoring + coaching) |
-| `USE_ML` | `0` (skip local models — use Claude instead) |
-| `AZURE_CLIENT_ID` | *(from Azure AD — optional for Teams)* |
-| `AZURE_CLIENT_SECRET` | *(from Azure AD — optional for Teams)* |
-| `AZURE_REDIRECT_URI` | `https://<your-render-url>/api/teams/callback` |
-
-Note your Render URL (e.g. `https://meetingmetric-api.onrender.com`).
-
-> **Persistence note:** Render's free tier has an **ephemeral filesystem** — the SQLite DB and uploads are wiped on every restart/redeploy. For data that survives, attach a Render **persistent disk** mounted where `MEETINGMETRIC_DB` points (and the `uploads/` dir), or migrate to a hosted Postgres.
-
-### Step 2: Deploy the frontend to Vercel
-
-1. Sign up at [vercel.com](https://vercel.com) and **Add New → Project** → import the `MeetingMetric` repo
-2. **Root Directory**: `website/pdf-upload-app` (click *Edit* and select it — this is a monorepo subfolder)
-3. **Framework Preset**: Create React App (auto-detected). Build command `npm run build`, output `build/`
-4. **Environment Variable**: add `REACT_APP_API_URL` = your Render URL (e.g. `https://meetingmetric-api.onrender.com`)
-5. **Deploy.** Vercel gives you a URL like `https://meetingmetric.vercel.app`
-6. Go back to Render and set `CORS_ORIGIN` / `FRONTEND_URL` to that Vercel URL, then redeploy the backend
-
-SPA deep links are handled by `vercel.json` (rewrites all paths to `index.html`).
-
-### How it works
-
-- **Frontend** (React) is served by Vercel at your `.vercel.app` URL (or a custom domain)
-- **Backend** (Node.js API) runs on Render at your `.onrender.com` URL
-- The frontend calls the backend using `REACT_APP_API_URL`, **baked in at build time** — changing it requires a redeploy
-- CORS only accepts the origin(s) in `CORS_ORIGIN`
-
-### Redeploying
-
-- **Frontend**: push to `main` — Vercel auto-deploys (and builds a preview for every PR)
-- **Backend**: Render auto-deploys on push (if connected to the repo)
-- Changed `REACT_APP_API_URL`? Trigger a fresh Vercel build so the new value is baked in
-
----
+A **real-time Teams bot** (Level 3) is the intended next step but is **not implemented**. It would auto-join scheduled meetings, capture diarized transcription live (Azure Speech-to-Text / Whisper), and trigger analysis automatically when the meeting ends. This needs Azure Bot Service registration, a Teams app manifest with media permissions, and resource-specific consent for auto-join. Documented here as direction, not a current feature.
 
 ## Privacy & ethics
 
-Use for **development and meeting effectiveness**, with clear employee consent. Outputs are **explainable** (scores + transcript excerpts); tune policies for your jurisdiction.
-
-## Legacy
-
-Older scripts live under `.github/src/` (standalone Hugging Face CLI demo) and are not required for the web app.
+Intended for team-effectiveness and development use **with clear participant consent**. Outputs are explainable (scores plus transcript excerpts). Tune retention and policy for your jurisdiction.

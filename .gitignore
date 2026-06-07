@@ -1,18 +1,27 @@
+# dependencies
 node_modules/
-website/backend/node_modules/
-website/pdf-upload-app/node_modules/
-website/backend/data/
-website/backend/uploads/
-*.db
-.DS_Store
+
+# build output
+build/
+dist/
+out/
+
+# environment
 .env
 .env.local
+**/.env
 
-# build output (Vercel/CRA build locally; not committed)
-build/
-website/pdf-upload-app/build/
+# runtime data (SQLite DB + uploaded files)
+*.db
+**/data/*.db
+**/uploads/
 
-# editor / IDE
+# IDE / editor
 .idea/
 *.iml
+.vscode/
 .vercel/
+
+# OS / logs
+.DS_Store
+*.log
