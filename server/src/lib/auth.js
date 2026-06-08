@@ -33,8 +33,8 @@ function getUserByEmail(email) {
   return db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
 }
 
-function signToken(userId, email) {
-  return jwt.sign({ sub: userId, email }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+function signToken(userId, email, extra = {}) {
+  return jwt.sign({ sub: userId, email, ...extra }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
 }
 
 function verifyToken(token) {

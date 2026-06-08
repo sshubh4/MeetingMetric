@@ -20,8 +20,15 @@
     "cors": "^2.8.5",
     "dotenv": "^17.4.0",
     "express": "^4.21.1",
+    "express-rate-limit": "^8.5.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "pdfkit": "^0.19.0",
+    "pino": "^10.3.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "supertest": "^7.2.2"
   }
 }

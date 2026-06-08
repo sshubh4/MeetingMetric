@@ -1,13 +1,33 @@
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply bg-bg text-slate-200 font-sans; }
+  * { box-sizing: border-box; }
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+@layer components {
+  .card { @apply bg-surface border border-white/[0.08] rounded-xl p-5; }
+  .btn-primary { @apply bg-accent-dim hover:bg-accent text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-ghost { @apply border border-white/10 hover:border-white/20 text-slate-300 hover:text-white text-sm px-4 py-2 rounded-lg transition-colors; }
+  .btn-danger { @apply bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm px-4 py-2 rounded-lg transition-colors border border-red-600/20; }
+  .input { @apply bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-slate-200 text-sm placeholder-muted focus:outline-none focus:border-accent/50 w-full; }
+  .select { @apply bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-accent/50 w-full; }
+  .badge { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium; }
+  .badge-role-admin { @apply bg-purple-500/20 text-purple-300 border border-purple-500/20; }
+  .badge-role-hr { @apply bg-cyan-500/20 text-cyan-300 border border-cyan-500/20; }
+  .badge-role-manager { @apply bg-blue-500/20 text-blue-300 border border-blue-500/20; }
+  .badge-role-employee { @apply bg-white/10 text-slate-400 border border-white/10; }
+  .stat-card { @apply card flex flex-col gap-1; }
+  .stat-val { @apply text-3xl font-bold text-white; }
+  .stat-label { @apply text-xs text-muted uppercase tracking-wider; }
+  .dim-bar { @apply h-1.5 rounded-full bg-white/10 overflow-hidden; }
+  .dim-bar-fill { @apply h-full rounded-full bg-accent transition-all; }
+  .table-base { @apply w-full text-sm; }
+  .table-base th { @apply text-left text-xs text-muted uppercase tracking-wider pb-3 font-medium; }
+  .table-base td { @apply py-3 border-t border-white/[0.05]; }
+  .nav-item { @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors; }
+  .nav-item-active { @apply bg-white/10 text-white; }
+  .nav-item-inactive { @apply text-muted hover:text-white hover:bg-white/5; }
 }
