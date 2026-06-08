@@ -7,14 +7,26 @@ import {
 import AppShell from './AppShell';
 import { getTeamParticipants, listProjects } from '../api';
 
+const DIMS = [
+  { key: 'avg_engagement',    label: 'Engagement' },
+  { key: 'avg_sentiment',     label: 'Sentiment' },
+  { key: 'avg_collaboration', label: 'Collaboration' },
+  { key: 'avg_initiative',    label: 'Initiative' },
+  { key: 'avg_clarity',       label: 'Clarity' },
+];
+
+function initials(name) {
+  return name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+}
+
 function TeamPage() {
   const [participants, setParticipants] = useState([]);
-  const [projects, setProjects] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [projects, setProjects]         = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [dateFrom, setDateFrom]         = useState('');
+  const [dateTo, setDateTo]             = useState('');
   const [projectFilter, setProjectFilter] = useState('');
-  const [expanded, setExpanded] = useState(null);
+  const [panelName, setPanelName]       = useState(null);   // selected participant name
 
   useEffect(() => { listProjects().then(setProjects).catch(() => {}); }, []);
 
@@ -30,155 +42,200 @@ function TeamPage() {
       .finally(() => setLoading(false));
   }, [dateFrom, dateTo, projectFilter]);
 
-  const initials = (name) =>
-    name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
-
-  const dims = [
-    { key: 'avg_engagement', label: 'Engagement' },
-    { key: 'avg_sentiment', label: 'Sentiment' },
-    { key: 'avg_collaboration', label: 'Collaboration' },
-    { key: 'avg_initiative', label: 'Initiative' },
-    { key: 'avg_clarity', label: 'Clarity' },
-  ];
+  const panelData = panelName ? participants.find((p) => p.name === panelName) : null;
 
   return (
-    <AppShell title="Roster & Trajectories" subtitle="Employee performance trajectories across meetings">
-      <div className="cmd-toolbar">
-        <div className="date-filter">
-          <label>From<input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></label>
-          <label>To<input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></label>
-          <label>
-            Project
-            <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
-              <option value="">All projects</option>
-              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </label>
-          {(dateFrom || dateTo || projectFilter) && (
-            <button type="button" className="btn-ghost small" onClick={() => { setDateFrom(''); setDateTo(''); setProjectFilter(''); }}>Clear</button>
-          )}
-        </div>
+    <AppShell title="Team" subtitle="Roster and performance trajectories">
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <input type="date" className="input w-auto text-sm" value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)} title="From" />
+        <input type="date" className="input w-auto text-sm" value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)} title="To" />
+        <select className="select w-auto text-sm" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+          <option value="">All projects</option>
+          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        {(dateFrom || dateTo || projectFilter) && (
+          <button type="button" className="btn-ghost text-sm"
+            onClick={() => { setDateFrom(''); setDateTo(''); setProjectFilter(''); }}>
+            Clear
+          </button>
+        )}
       </div>
 
       {loading ? (
-        <p className="muted">Loading team data…</p>
+        <p className="text-muted">Loading team data…</p>
       ) : participants.length === 0 ? (
-        <div className="exec-card"><p className="muted">No participants found. Upload meetings to see your team.</p></div>
+        <div className="card text-center py-12">
+          <p className="text-muted">No participants yet. Upload meetings to see your team.</p>
+        </div>
       ) : (
-        <div className="roster-grid">
-          {participants.map((p) => {
-            const isExpanded = expanded === p.name;
-            const radar = dims.map((d) => ({ dim: d.label, v: p[d.key] ?? 0 }));
-            const trendData = (p.meetings || []).slice(-10).map((mt, i) => ({
-              idx: i + 1,
-              engagement: Math.round((mt.scores?.engagement ?? 0) * 100),
-              sentiment: Math.round((mt.scores?.sentiment ?? 0) * 100),
-              clarity: Math.round((mt.scores?.clarity ?? 0) * 100),
-            }));
+        <div className="card overflow-x-auto">
+          <table className="table-base">
+            <thead>
+              <tr>
+                <th>Participant</th>
+                <th>Meetings</th>
+                <th>Engagement</th>
+                <th>Talk ratio</th>
+                <th>Projects</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {participants.map((p) => (
+                <tr key={p.name}
+                  className={`cursor-pointer transition-colors ${panelName === p.name ? 'bg-accent/5' : 'hover:bg-white/[0.03]'}`}
+                  onClick={() => setPanelName(panelName === p.name ? null : p.name)}
+                >
+                  <td>
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-accent-dim flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
+                        {initials(p.name)}
+                      </div>
+                      <span className="font-medium text-slate-200 text-sm">{p.name}</span>
+                    </div>
+                  </td>
+                  <td className="text-muted">{p.meeting_count}</td>
+                  <td>
+                    <div className="flex items-center gap-2">
+                      <div className="dim-bar w-16">
+                        <div className="dim-bar-fill" style={{ width: `${(p.avg_engagement ?? 0) * 100}%` }} />
+                      </div>
+                      <span className="text-xs text-accent font-medium">{Math.round((p.avg_engagement ?? 0) * 100)}%</span>
+                    </div>
+                  </td>
+                  <td className="text-muted text-sm">{Math.round((p.avg_talk_ratio ?? 0) * 100)}%</td>
+                  <td className="text-muted text-xs">{p.projects?.join(', ') || '—'}</td>
+                  <td>
+                    <span className="text-xs text-accent">{panelName === p.name ? 'Close ↑' : 'Expand →'}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-            return (
-              <div key={p.name} className={`exec-card roster-card ${isExpanded ? 'expanded' : ''}`}>
-                <div className="roster-card-head" onClick={() => setExpanded(isExpanded ? null : p.name)} role="button" tabIndex={0}>
-                  <div className="avatar">{initials(p.name)}</div>
-                  <div className="roster-info">
-                    <strong>{p.name}</strong>
-                    <span className="muted small">{p.meeting_count} meeting{p.meeting_count !== 1 ? 's' : ''}{p.projects.length > 0 ? ` · ${p.projects.join(', ')}` : ''}</span>
-                  </div>
-                  <div className="roster-score">
-                    <span className="eff-badge">{Math.round(p.avg_engagement * 100)}%</span>
-                    <span className="muted small">engagement</span>
-                  </div>
-                  <span className={`expand-arrow ${isExpanded ? 'open' : ''}`}>▾</span>
+      {/* 400px slide-out panel */}
+      {panelData && (
+        <div className="fixed inset-0 z-40 flex" onClick={() => setPanelName(null)}>
+          <div className="flex-1" />
+          <div
+            className="w-96 bg-surface border-l border-white/[0.06] h-full overflow-y-auto shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Panel header */}
+            <div className="sticky top-0 bg-surface border-b border-white/[0.06] px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-accent-dim flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                  {initials(panelData.name)}
                 </div>
-
-                {isExpanded && (
-                  <div className="roster-detail">
-                    <div className="roster-detail-grid">
-                      {/* Radar chart */}
-                      <div className="roster-radar-wrap">
-                        <ResponsiveContainer width="100%" height={200}>
-                          <RadarChart data={radar}>
-                            <PolarGrid stroke="rgba(255,255,255,0.08)" />
-                            <PolarAngleAxis dataKey="dim" tick={{ fill: '#8b95a8', fontSize: 9 }} />
-                            <PolarRadiusAxis domain={[0, 1]} tick={false} axisLine={false} />
-                            <Radar dataKey="v" stroke="#a78bfa" fill="#7c3aed" fillOpacity={0.3} />
-                          </RadarChart>
-                        </ResponsiveContainer>
-                      </div>
-
-                      {/* Dimension bars + stats */}
-                      <div className="roster-stats">
-                        {dims.map((d) => (
-                          <div key={d.key} className="team-stat-row">
-                            <span>{d.label}</span>
-                            <div className="team-bar-track">
-                              <div className="team-bar-fill" style={{ width: `${(p[d.key] ?? 0) * 100}%` }} />
-                            </div>
-                            <span className="team-bar-val">{((p[d.key] ?? 0) * 100).toFixed(0)}%</span>
-                          </div>
-                        ))}
-                        <div className="team-stat-row">
-                          <span>Talk ratio</span>
-                          <div className="team-bar-track">
-                            <div className="team-bar-fill" style={{ width: `${(p.avg_talk_ratio ?? 0) * 100}%` }} />
-                          </div>
-                          <span className="team-bar-val">{((p.avg_talk_ratio ?? 0) * 100).toFixed(0)}%</span>
-                        </div>
-                      </div>
-
-                      {/* Trajectory trendline */}
-                      {trendData.length >= 2 && (
-                        <div className="roster-trajectory">
-                          <h4 className="section-label small">10-Meeting Trajectory</h4>
-                          <ResponsiveContainer width="100%" height={140}>
-                            <LineChart data={trendData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                              <XAxis dataKey="idx" tick={{ fill: '#6b7280', fontSize: 10 }} label={{ value: 'Meeting #', position: 'bottom', fill: '#6b7280', fontSize: 10 }} />
-                              <YAxis domain={[0, 100]} tick={{ fill: '#6b7280', fontSize: 10 }} />
-                              <Tooltip contentStyle={{ background: '#141720', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }} />
-                              <Line type="monotone" dataKey="engagement" stroke="#a78bfa" strokeWidth={2} dot={false} name="Engagement" />
-                              <Line type="monotone" dataKey="sentiment" stroke="#4ade80" strokeWidth={1.5} dot={false} name="Sentiment" />
-                              <Line type="monotone" dataKey="clarity" stroke="#fbbf24" strokeWidth={1.5} dot={false} name="Clarity" />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Coaching vault */}
-                    {p.meetings?.some((mt) => mt.coaching_text) && (
-                      <div className="coaching-vault">
-                        <h4 className="section-label small">Coaching Vault</h4>
-                        <div className="vault-items">
-                          {p.meetings.filter((mt) => mt.coaching_text).slice(-5).map((mt) => (
-                            <div key={mt.meeting_id} className="vault-item">
-                              <div className="vault-item-head">
-                                <Link to={`/meeting/${mt.meeting_id}`} className="vault-meeting-link">{mt.meeting_title}</Link>
-                                <span className="muted small">{new Date(mt.meeting_date).toLocaleDateString()}</span>
-                              </div>
-                              <p className="vault-text">{mt.coaching_text}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Meeting history */}
-                    <h4 className="section-label small" style={{ marginTop: 12 }}>Meeting History</h4>
-                    <div className="team-meeting-list">
-                      {p.meetings.map((mt) => (
-                        <Link to={`/meeting/${mt.meeting_id}`} key={mt.meeting_id} className="team-meeting-row">
-                          <span>{mt.meeting_title}</span>
-                          <span className="muted small">{new Date(mt.meeting_date).toLocaleDateString()}</span>
-                          <span className="eff-badge small">{Math.round((mt.scores?.engagement ?? 0) * 100)}%</span>
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <div>
+                  <div className="font-semibold text-white">{panelData.name}</div>
+                  <div className="text-xs text-muted">{panelData.meeting_count} meetings</div>
+                </div>
               </div>
-            );
-          })}
+              <button type="button" onClick={() => setPanelName(null)} className="text-muted hover:text-white">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+
+            <div className="px-5 py-4 space-y-6">
+              {/* Radar */}
+              <div>
+                <div className="text-xs text-muted uppercase tracking-wider mb-2">Communication Profile</div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <RadarChart data={DIMS.map((d) => ({ dim: d.label, v: panelData[d.key] ?? 0 }))}>
+                    <PolarGrid stroke="rgba(255,255,255,0.08)" />
+                    <PolarAngleAxis dataKey="dim" tick={{ fill: '#8b95a8', fontSize: 9 }} />
+                    <PolarRadiusAxis domain={[0, 1]} tick={false} axisLine={false} />
+                    <Radar dataKey="v" stroke="#a78bfa" fill="#7c3aed" fillOpacity={0.3} />
+                  </RadarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Dimension bars */}
+              <div>
+                <div className="text-xs text-muted uppercase tracking-wider mb-3">Dimensions</div>
+                <div className="space-y-2">
+                  {[...DIMS, { key: 'avg_talk_ratio', label: 'Talk ratio' }].map((d) => (
+                    <div key={d.key} className="flex items-center gap-2">
+                      <span className="text-xs text-muted w-24 flex-shrink-0">{d.label}</span>
+                      <div className="dim-bar flex-1">
+                        <div className="dim-bar-fill" style={{ width: `${(panelData[d.key] ?? 0) * 100}%` }} />
+                      </div>
+                      <span className="text-xs text-muted w-8 text-right">{((panelData[d.key] ?? 0) * 100).toFixed(0)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Trajectory */}
+              {(() => {
+                const trendData = (panelData.meetings || []).slice(-10).map((mt, i) => ({
+                  idx: i + 1,
+                  engagement: Math.round((mt.scores?.engagement ?? 0) * 100),
+                  sentiment: Math.round((mt.scores?.sentiment ?? 0) * 100),
+                  clarity: Math.round((mt.scores?.clarity ?? 0) * 100),
+                }));
+                if (trendData.length < 2) return null;
+                return (
+                  <div>
+                    <div className="text-xs text-muted uppercase tracking-wider mb-2">10-Meeting Trajectory</div>
+                    <ResponsiveContainer width="100%" height={140}>
+                      <LineChart data={trendData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                        <XAxis dataKey="idx" tick={{ fill: '#6b7280', fontSize: 9 }} />
+                        <YAxis domain={[0, 100]} tick={{ fill: '#6b7280', fontSize: 9 }} />
+                        <Tooltip contentStyle={{ background: '#16181d', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} />
+                        <Line type="monotone" dataKey="engagement" stroke="#a78bfa" strokeWidth={2} dot={false} name="Engagement" />
+                        <Line type="monotone" dataKey="sentiment"  stroke="#4ade80" strokeWidth={1.5} dot={false} name="Sentiment" />
+                        <Line type="monotone" dataKey="clarity"    stroke="#fbbf24" strokeWidth={1.5} dot={false} name="Clarity" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                );
+              })()}
+
+              {/* Coaching vault */}
+              {panelData.meetings?.some((mt) => mt.coaching_text) && (
+                <div>
+                  <div className="text-xs text-muted uppercase tracking-wider mb-3">Coaching Vault</div>
+                  <div className="space-y-3">
+                    {panelData.meetings.filter((mt) => mt.coaching_text).slice(-5).map((mt) => (
+                      <div key={mt.meeting_id} className="bg-white/[0.03] rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <Link to={`/meeting/${mt.meeting_id}`} className="text-xs font-medium text-accent hover:underline truncate">
+                            {mt.meeting_title}
+                          </Link>
+                          <span className="text-xs text-muted ml-2 flex-shrink-0">{new Date(mt.meeting_date).toLocaleDateString()}</span>
+                        </div>
+                        <p className="text-xs text-muted leading-relaxed">{mt.coaching_text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Meeting history */}
+              <div>
+                <div className="text-xs text-muted uppercase tracking-wider mb-3">Meeting History</div>
+                <div className="space-y-1">
+                  {panelData.meetings?.map((mt) => (
+                    <Link key={mt.meeting_id} to={`/meeting/${mt.meeting_id}`}
+                      className="flex items-center gap-3 py-2 px-2 -mx-2 rounded-lg hover:bg-white/5 transition-colors">
+                      <span className="text-xs text-muted flex-shrink-0">{new Date(mt.meeting_date).toLocaleDateString()}</span>
+                      <span className="text-sm text-slate-300 flex-1 truncate">{mt.meeting_title}</span>
+                      <span className="text-xs text-accent flex-shrink-0">{Math.round((mt.scores?.engagement ?? 0) * 100)}%</span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </AppShell>

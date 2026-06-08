@@ -1,26 +1,41 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import AppShell from './AppShell';
 import { listMeetings, listProjects, analyzeMeeting } from '../api';
 
-function MeetingsListPage() {
-  const [rows, setRows] = useState([]);
-  const [projects, setProjects] = useState([]);
-  const [error, setError] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [view, setView] = useState('list');
-  const [drawer, setDrawer] = useState(null);
+const SOURCE_BADGES = {
+  manual:       { label: 'Manual',        cls: 'bg-white/10 text-slate-400' },
+  teams_auto:   { label: 'Teams Auto',    cls: 'bg-blue-500/20 text-blue-300' },
+  teams_import: { label: 'Teams Import',  cls: 'bg-indigo-500/20 text-indigo-300' },
+  bot:          { label: 'Bot',           cls: 'bg-yellow-500/20 text-yellow-300' },
+};
 
-  const [title, setTitle] = useState('');
-  const [text, setText] = useState('');
-  const [file, setFile] = useState(null);
-  const [projectId, setProjectId] = useState('');
-  const [scheduledAt, setScheduledAt] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState('');
+function SourceBadge({ source }) {
+  const s = SOURCE_BADGES[source] || SOURCE_BADGES.manual;
+  return <span className={`badge ${s.cls}`}>{s.label}</span>;
+}
+
+function MeetingsListPage() {
+  const [rows, setRows]           = useState([]);
+  const [projects, setProjects]   = useState([]);
+  const [error, setError]         = useState('');
+  const [dateFrom, setDateFrom]   = useState('');
+  const [dateTo, setDateTo]       = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+  const [sortBy, setSortBy]       = useState('date');     // date | title | eff
+  const [sortDir, setSortDir]     = useState('desc');
+  const [drawer, setDrawer]       = useState(null);       // meeting id
   const [showUpload, setShowUpload] = useState(false);
-  const [drag, setDrag] = useState(false);
+  const [drag, setDrag]           = useState(false);
+
+  // Upload form state
+  const [uTitle, setUTitle]         = useState('');
+  const [uText, setUText]           = useState('');
+  const [uFile, setUFile]           = useState(null);
+  const [uProjectId, setUProjectId] = useState('');
+  const [uScheduled, setUScheduled] = useState('');
+  const [uploading, setUploading]   = useState(false);
   const navigate = useNavigate();
 
   const load = useCallback(() => {
@@ -32,264 +47,251 @@ function MeetingsListPage() {
 
   const handleUpload = async (e) => {
     e.preventDefault();
-    if (!text.trim() && !file) { setUploadError('Paste a transcript or choose a file'); return; }
-    setUploadError('');
+    if (!uText.trim() && !uFile) { toast.error('Paste a transcript or choose a file'); return; }
     setUploading(true);
     try {
       const data = await analyzeMeeting({
-        title: title || 'Untitled meeting', text, file,
-        projectId: projectId || undefined,
-        scheduledAt: scheduledAt || undefined,
+        title: uTitle || 'Untitled meeting', text: uText, file: uFile,
+        projectId: uProjectId || undefined, scheduledAt: uScheduled || undefined,
       });
       navigate(`/meeting/${data.meetingId}`);
     } catch (err) {
-      setUploadError(err.response?.data?.error || err.message || 'Upload failed');
-    } finally {
+      toast.error(err.response?.data?.error || err.message || 'Upload failed');
       setUploading(false);
     }
   };
 
-  const filtered = rows.filter((r) => {
-    const d = r.scheduled_at || r.created_at;
-    const ds = d ? d.slice(0, 10) : '';
-    if (dateFrom && ds < dateFrom) return false;
-    if (dateTo && ds > dateTo) return false;
-    return true;
-  });
+  const filtered = useMemo(() => {
+    let list = rows.filter((r) => {
+      const ds = (r.scheduled_at || r.created_at || '').slice(0, 10);
+      if (dateFrom && ds < dateFrom) return false;
+      if (dateTo && ds > dateTo) return false;
+      if (projectFilter && String(r.project_id) !== String(projectFilter)) return false;
+      return true;
+    });
+    list = [...list].sort((a, b) => {
+      let av, bv;
+      if (sortBy === 'title') {
+        av = (a.title || '').toLowerCase();
+        bv = (b.title || '').toLowerCase();
+        return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      }
+      if (sortBy === 'eff') {
+        av = a.efficiency_score ?? -1;
+        bv = b.efficiency_score ?? -1;
+      } else {
+        av = new Date(a.scheduled_at || a.created_at).getTime();
+        bv = new Date(b.scheduled_at || b.created_at).getTime();
+      }
+      return sortDir === 'asc' ? av - bv : bv - av;
+    });
+    return list;
+  }, [rows, dateFrom, dateTo, projectFilter, sortBy, sortDir]);
+
+  const toggleSort = (col) => {
+    if (sortBy === col) setSortDir((d) => d === 'asc' ? 'desc' : 'asc');
+    else { setSortBy(col); setSortDir('desc'); }
+  };
 
   const fmtDate = (iso) => {
     if (!iso) return '—';
     return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
-  const fmtTime = (iso) => {
-    if (!iso) return '';
-    return new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const grouped = useMemo(() => {
-    const m = {};
-    filtered.forEach((r) => {
-      const pn = r.project_name || 'Unassigned';
-      if (!m[pn]) m[pn] = [];
-      m[pn].push(r);
-    });
-    return m;
-  }, [filtered]);
-
-  const calData = useMemo(() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const mo = now.getMonth();
-    const first = new Date(y, mo, 1);
-    const days = new Date(y, mo + 1, 0).getDate();
-    const startDay = first.getDay();
-    const cells = [];
-    for (let i = 0; i < startDay; i++) cells.push(null);
-    for (let d = 1; d <= days; d++) cells.push(d);
-    const byDay = {};
-    filtered.forEach((r) => {
-      const ds = (r.scheduled_at || r.created_at || '').slice(0, 10);
-      const dd = new Date(ds);
-      if (dd.getMonth() === mo && dd.getFullYear() === y) {
-        const day = dd.getDate();
-        if (!byDay[day]) byDay[day] = [];
-        byDay[day].push(r);
-      }
-    });
-    return { cells, byDay, month: first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) };
-  }, [filtered]);
 
   const drawerData = drawer ? rows.find((r) => r.id === drawer) : null;
 
+  const SortIcon = ({ col }) => {
+    if (sortBy !== col) return <span className="ml-1 text-white/20">↕</span>;
+    return <span className="ml-1 text-accent">{sortDir === 'asc' ? '↑' : '↓'}</span>;
+  };
+
   return (
-    <AppShell title="Intelligence Hub" subtitle="All meetings, transcripts, and analyses">
-      <div className="hub-toolbar">
-        <div className="date-filter">
-          <label>From<input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></label>
-          <label>To<input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></label>
-          {(dateFrom || dateTo) && (
-            <button type="button" className="btn-ghost small" onClick={() => { setDateFrom(''); setDateTo(''); }}>Clear</button>
-          )}
-        </div>
-        <div className="hub-actions">
-          <div className="view-toggles">
-            {['list', 'calendar', 'project'].map((v) => (
-              <button key={v} type="button" className={`view-btn ${view === v ? 'active' : ''}`} onClick={() => setView(v)}>
-                {v.charAt(0).toUpperCase() + v.slice(1)}
-              </button>
-            ))}
-          </div>
-          <button type="button" className={`btn-primary compact ${showUpload ? 'active' : ''}`} onClick={() => setShowUpload(!showUpload)}>
+    <AppShell title="Meetings" subtitle="All meeting analyses in your workspace">
+
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+          className="input w-auto text-sm" title="From" />
+        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+          className="input w-auto text-sm" title="To" />
+        <select className="select w-auto text-sm" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+          <option value="">All projects</option>
+          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        {(dateFrom || dateTo || projectFilter) && (
+          <button type="button" className="btn-ghost text-sm"
+            onClick={() => { setDateFrom(''); setDateTo(''); setProjectFilter(''); }}>
+            Clear
+          </button>
+        )}
+        <div className="ml-auto">
+          <button type="button" className="btn-primary"
+            onClick={() => { setShowUpload(!showUpload); }}>
             {showUpload ? '✕ Close' : '+ New Meeting'}
           </button>
         </div>
       </div>
 
-      {/* Upload form */}
+      {/* Quick-upload form */}
       {showUpload && (
-        <div className="exec-card upload-card">
-          <h3 className="exec-card-title">Upload transcript</h3>
-          <p className="muted small">Paste or upload — analysis runs automatically.</p>
-          <form onSubmit={handleUpload} className="upload-form">
-            <div className="upload-grid">
-              <div className="upload-fields">
-                <label>Title<input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Q3 Strategy Sync" /></label>
-                <div className="upload-row-2">
-                  <label>
-                    Project
-                    <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-                      <option value="">No project</option>
-                      {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </label>
-                  <label>Date<input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></label>
-                </div>
-                <label>Transcript<textarea value={text} onChange={(e) => setText(e.target.value)} rows={5} placeholder={'Alice: Good morning.\nBob: Let\'s begin.'} /></label>
-              </div>
+        <div className="card mb-5">
+          <h3 className="text-sm font-semibold text-white mb-4">Quick upload</h3>
+          <form onSubmit={handleUpload}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+              <input type="text" className="input" placeholder="Meeting title" value={uTitle}
+                onChange={(e) => setUTitle(e.target.value)} />
+              <select className="select" value={uProjectId} onChange={(e) => setUProjectId(e.target.value)}>
+                <option value="">No project</option>
+                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <input type="datetime-local" className="input" value={uScheduled}
+                onChange={(e) => setUScheduled(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+              <textarea className="input font-mono text-xs resize-none" rows={5}
+                placeholder={"Alice: Let's get started.\nBob: Sure, I'll cover blockers."}
+                value={uText} onChange={(e) => setUText(e.target.value)} />
               <div
-                className={`upload-drop ${drag ? 'drag-active' : ''}`}
+                className={`border-2 border-dashed rounded-xl flex flex-col items-center justify-center p-4 transition-colors text-center ${drag ? 'border-accent bg-accent/5' : 'border-white/10 hover:border-white/20'}`}
                 onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
                 onDragLeave={() => setDrag(false)}
-                onDrop={(e) => { e.preventDefault(); setDrag(false); setFile(e.dataTransfer.files?.[0] || null); }}
+                onDrop={(e) => { e.preventDefault(); setDrag(false); setUFile(e.dataTransfer.files?.[0] || null); }}
               >
-                <div className="drop-icon">📄</div>
-                <p>Drag & drop file</p>
-                <label className="file-pick">
-                  <input type="file" accept=".txt,.pdf,text/plain,application/pdf" onChange={(e) => setFile(e.target.files[0] || null)} />
-                  {file ? file.name : 'Browse files'}
+                <div className="text-2xl mb-1">📄</div>
+                <p className="text-xs text-muted mb-2">{uFile ? uFile.name : 'Drag & drop .txt or .pdf'}</p>
+                <label className="btn-ghost text-xs cursor-pointer">
+                  <input type="file" accept=".txt,.pdf,text/plain,application/pdf" className="hidden"
+                    onChange={(e) => setUFile(e.target.files[0] || null)} />
+                  Browse
                 </label>
+                {uFile && <button type="button" className="text-xs text-muted hover:text-danger mt-1" onClick={() => setUFile(null)}>Remove</button>}
               </div>
             </div>
-            {uploadError && <p className="error">{uploadError}</p>}
-            <button type="submit" className="btn-primary compact" disabled={uploading}>{uploading ? 'Analyzing…' : 'Upload & Analyze'}</button>
+            <button type="submit" className="btn-primary" disabled={uploading}>
+              {uploading ? 'Analyzing…' : 'Analyze →'}
+            </button>
           </form>
         </div>
       )}
 
-      {error && <p className="error">{error}</p>}
+      {error && <p className="text-danger text-sm mb-4">{error}</p>}
 
-      {/* LIST VIEW */}
-      {view === 'list' && (
-        filtered.length === 0 ? (
-          <div className="exec-card"><p className="muted">No meetings found. Upload a transcript to get started.</p></div>
-        ) : (
-          <div className="smart-table">
-            <div className="st-header">
-              <span className="st-col-date">Date</span>
-              <span className="st-col-title">Meeting</span>
-              <span className="st-col-project">Project</span>
-              <span className="st-col-eff">Score</span>
-              <span className="st-col-act" />
-            </div>
-            {filtered.map((r) => {
-              const dateStr = r.scheduled_at || r.created_at;
-              return (
-                <div
+      {/* Table */}
+      {filtered.length === 0 ? (
+        <div className="card text-center py-12">
+          <p className="text-muted">No meetings found. <Link to="/analyze" className="text-accent hover:underline">Analyze one →</Link></p>
+        </div>
+      ) : (
+        <div className="card overflow-x-auto">
+          <table className="table-base">
+            <thead>
+              <tr>
+                <th className="cursor-pointer select-none" onClick={() => toggleSort('date')}>
+                  Date <SortIcon col="date" />
+                </th>
+                <th className="cursor-pointer select-none" onClick={() => toggleSort('title')}>
+                  Meeting <SortIcon col="title" />
+                </th>
+                <th>Source</th>
+                <th>Project</th>
+                <th className="cursor-pointer select-none text-right" onClick={() => toggleSort('eff')}>
+                  Score <SortIcon col="eff" />
+                </th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => (
+                <tr
                   key={r.id}
-                  className={`st-row ${drawer === r.id ? 'selected' : ''}`}
+                  className={`cursor-pointer transition-colors ${drawer === r.id ? 'bg-accent/5' : 'hover:bg-white/[0.03]'}`}
                   onClick={() => setDrawer(drawer === r.id ? null : r.id)}
-                  role="button"
-                  tabIndex={0}
                 >
-                  <span className="st-col-date">
-                    <span className="st-date-main">{fmtDate(dateStr)}</span>
-                    <span className="st-date-sub">{fmtTime(dateStr)}</span>
-                  </span>
-                  <span className="st-col-title">{r.title}</span>
-                  <span className="st-col-project">{r.project_name ? <span className="pill small">{r.project_name}</span> : <span className="muted small">—</span>}</span>
-                  <span className="st-col-eff">
-                    <span className="eff-badge small">{r.efficiency_score != null ? `${Math.round(r.efficiency_score * 100)}%` : '—'}</span>
-                  </span>
-                  <Link to={`/meeting/${r.id}`} className="st-col-act" onClick={(e) => e.stopPropagation()}>Open →</Link>
-                </div>
-              );
-            })}
-          </div>
-        )
-      )}
-
-      {/* CALENDAR VIEW */}
-      {view === 'calendar' && (
-        <div className="exec-card">
-          <h3 className="exec-card-title">{calData.month}</h3>
-          <div className="cal-weekdays">
-            {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d) => <span key={d} className="cal-wd">{d}</span>)}
-          </div>
-          <div className="cal-cells">
-            {calData.cells.map((day, i) => (
-              <div key={i} className={`cal-cell ${!day ? 'cal-empty' : ''}`}>
-                {day && (
-                  <>
-                    <div className="cal-day-num">{day}</div>
-                    <div className="cal-day-meets">
-                      {(calData.byDay[day] || []).map((m) => (
-                        <Link to={`/meeting/${m.id}`} key={m.id} className="cal-meet-pill">
-                          <span className="cal-meet-title">{m.title}</span>
-                          <span className="cal-meet-eff">{m.efficiency_score != null ? `${Math.round(m.efficiency_score * 100)}%` : ''}</span>
-                        </Link>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
+                  <td className="text-muted text-xs whitespace-nowrap">{fmtDate(r.scheduled_at || r.created_at)}</td>
+                  <td>
+                    <span className="font-medium text-slate-200 text-sm">{r.title}</span>
+                    {r.dominant_speaker_alert && <span className="ml-2 text-warning text-xs">⚠ Dominance</span>}
+                  </td>
+                  <td><SourceBadge source={r.source} /></td>
+                  <td>
+                    {r.project_name
+                      ? <span className="badge" style={{ background: (r.project_color || '#a78bfa') + '25', color: r.project_color || '#a78bfa' }}>{r.project_name}</span>
+                      : <span className="text-muted text-xs">—</span>}
+                  </td>
+                  <td className="text-right">
+                    <span className="text-accent font-semibold text-sm">
+                      {r.efficiency_score != null ? `${Math.round(r.efficiency_score * 100)}%` : '—'}
+                    </span>
+                  </td>
+                  <td>
+                    <Link to={`/meeting/${r.id}`} onClick={(e) => e.stopPropagation()}
+                      className="text-xs text-accent hover:text-accent/70 whitespace-nowrap">
+                      Open →
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="pt-3 border-t border-white/[0.05] text-xs text-muted">
+            {filtered.length} meeting{filtered.length !== 1 ? 's' : ''}
           </div>
         </div>
       )}
 
-      {/* PROJECT VIEW */}
-      {view === 'project' && (
-        Object.keys(grouped).length === 0 ? (
-          <div className="exec-card"><p className="muted">No meetings found.</p></div>
-        ) : (
-          <div className="project-groups">
-            {Object.entries(grouped).map(([pn, meetings]) => (
-              <div key={pn} className="exec-card project-group">
-                <h3 className="project-group-title">
-                  <span className="project-dot" style={{ background: pn === 'Unassigned' ? '#6b7280' : '#a78bfa' }} />
-                  {pn}
-                  <span className="muted small" style={{ marginLeft: 8 }}>{meetings.length} meeting{meetings.length !== 1 ? 's' : ''}</span>
-                </h3>
-                <div className="project-group-meetings">
-                  {meetings.map((r) => (
-                    <Link to={`/meeting/${r.id}`} key={r.id} className="activity-card">
-                      <span className="activity-date">{fmtDate(r.scheduled_at || r.created_at)}</span>
-                      <strong className="activity-body">{r.title}</strong>
-                      <span className="eff-badge small">{r.efficiency_score != null ? `${Math.round(r.efficiency_score * 100)}%` : '—'}</span>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )
-      )}
-
-      {/* Quick-look drawer */}
+      {/* Slide-out quick-look drawer */}
       {drawerData && (
-        <div className="ql-drawer-overlay" onClick={() => setDrawer(null)}>
-          <div className="ql-drawer" onClick={(e) => e.stopPropagation()}>
-            <div className="ql-drawer-header">
-              <h3>{drawerData.title}</h3>
-              <button type="button" className="btn-ghost small" onClick={() => setDrawer(null)}>✕</button>
+        <div className="fixed inset-0 z-40 flex" onClick={() => setDrawer(null)}>
+          <div className="flex-1" />
+          <div
+            className="w-80 bg-surface border-l border-white/[0.06] h-full overflow-y-auto p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <h3 className="font-semibold text-white text-sm leading-snug pr-2">{drawerData.title}</h3>
+              <button type="button" onClick={() => setDrawer(null)} className="text-muted hover:text-white flex-shrink-0">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
             </div>
-            <div className="ql-drawer-body">
-              <div className="ql-stat-row">
-                <span className="muted small">Efficiency</span>
-                <span className="eff-badge">{drawerData.efficiency_score != null ? `${Math.round(drawerData.efficiency_score * 100)}%` : '—'}</span>
-              </div>
-              {drawerData.summary && (
-                <div className="ql-section">
-                  <h4 className="muted small">Summary</h4>
-                  <p className="ql-text">{drawerData.summary}</p>
-                </div>
+
+            <div className="flex items-center gap-2 mb-5 flex-wrap">
+              <SourceBadge source={drawerData.source} />
+              {drawerData.project_name && (
+                <span className="badge" style={{ background: (drawerData.project_color || '#a78bfa') + '25', color: drawerData.project_color || '#a78bfa' }}>
+                  {drawerData.project_name}
+                </span>
               )}
-              {drawerData.dominant_speaker_alert && <div className="badge warn" style={{ marginBottom: 8 }}>Dominance alert</div>}
-              {drawerData.low_engagement_alert && <div className="badge warn" style={{ marginBottom: 8 }}>Low engagement</div>}
-              <Link to={`/meeting/${drawerData.id}`} className="btn-primary compact" style={{ display: 'block', textAlign: 'center', marginTop: 12 }}>
-                Open full analysis →
-              </Link>
             </div>
+
+            <div className="space-y-3 mb-5">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted">Efficiency</span>
+                <span className="font-semibold text-accent">
+                  {drawerData.efficiency_score != null ? `${Math.round(drawerData.efficiency_score * 100)}%` : '—'}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted">Date</span>
+                <span className="text-slate-300 text-xs">{fmtDate(drawerData.scheduled_at || drawerData.created_at)}</span>
+              </div>
+              {drawerData.dominant_speaker_alert && (
+                <div className="badge bg-warning/20 text-warning border border-warning/20 w-full justify-center">Dominance alert</div>
+              )}
+              {drawerData.low_engagement_alert && (
+                <div className="badge bg-danger/20 text-danger border border-danger/20 w-full justify-center">Low engagement</div>
+              )}
+            </div>
+
+            {drawerData.summary && (
+              <div className="mb-5">
+                <div className="text-xs text-muted uppercase tracking-wider mb-2">Summary</div>
+                <p className="text-sm text-slate-300 leading-relaxed">{drawerData.summary}</p>
+              </div>
+            )}
+
+            <Link to={`/meeting/${drawerData.id}`} className="btn-primary w-full text-center block">
+              Open full analysis →
+            </Link>
           </div>
         </div>
       )}

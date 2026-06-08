@@ -90,12 +90,13 @@ Taylor Morgan: Motion carries. Next — we align on promotion readiness for two 
   },
 ];
 
-async function persistMeeting(userId, projectId, title, rawText, scheduledAt, analysis) {
+async function persistMeeting(userId, projectId, title, rawText, scheduledAt, analysis, orgId) {
   const created_at = new Date().toISOString();
   const rowM = db
     .prepare(
-      `INSERT INTO meetings (user_id, title, raw_text, summary, efficiency_score, dominant_speaker_alert, low_engagement_alert, created_at, project_id, scheduled_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
+      `INSERT INTO meetings (user_id, title, raw_text, summary, efficiency_score, dominant_speaker_alert,
+        low_engagement_alert, created_at, project_id, scheduled_at, uploaded_by, source, org_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
     )
     .get(
       userId,
@@ -107,13 +108,16 @@ async function persistMeeting(userId, projectId, title, rawText, scheduledAt, an
       analysis.low_engagement_alert ? 1 : 0,
       created_at,
       projectId == null ? null : Number(projectId),
-      scheduledAt == null ? null : String(scheduledAt)
+      scheduledAt == null ? null : String(scheduledAt),
+      userId,
+      'manual',
+      orgId || null
     );
   const meetingId = rowM.id;
 
   const insertS = db.prepare(`
-    INSERT INTO speaker_results (meeting_id, speaker_name, word_count, turn_count, talk_ratio, scores_json, utterance_breakdown_json, coaching_text, embedding_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO speaker_results (meeting_id, speaker_name, word_count, turn_count, talk_ratio, scores_json, utterance_breakdown_json, coaching_text, embedding_json, org_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   for (const s of analysis.speakers) {
     insertS.run(
@@ -125,7 +129,8 @@ async function persistMeeting(userId, projectId, title, rawText, scheduledAt, an
       JSON.stringify(s.scores),
       JSON.stringify(s.utterance_breakdown),
       s.coaching_text ?? '',
-      s.embedding_json ?? null
+      s.embedding_json ?? null,
+      orgId || null
     );
   }
 
@@ -151,6 +156,18 @@ async function main() {
   }
 
   const uid = user.id;
+
+  // Ensure demo org exists
+  let org = db.prepare('SELECT id FROM organizations WHERE slug = ?').get('demo-org');
+  if (!org) {
+    org = db
+      .prepare('INSERT INTO organizations (name, slug, created_at) VALUES (?, ?, ?) RETURNING id')
+      .get('Demo Org', 'demo-org', new Date().toISOString());
+    console.log('Created Demo Org');
+  }
+
+  // Set org_id and role on user (idempotent)
+  db.prepare('UPDATE users SET org_id = ?, role = ? WHERE id = ?').run(org.id, 'admin', uid);
 
   const existingMeetings = db.prepare('SELECT COUNT(*) AS c FROM meetings WHERE user_id = ?').get(uid).c;
   if (existingMeetings > 0) {
@@ -188,7 +205,7 @@ async function main() {
   for (let i = 0; i < TRANSCRIPTS.length; i++) {
     const t = TRANSCRIPTS[i];
     const analysis = await analyzeTranscript(t.text, t.title);
-    const mid = await persistMeeting(uid, projectFor(i), t.title, t.text, t.scheduled_at, analysis);
+    const mid = await persistMeeting(uid, projectFor(i), t.title, t.text, t.scheduled_at, analysis, org.id);
     console.log(`Seeded meeting #${mid}: ${t.title}`);
   }
 

@@ -18,19 +18,17 @@ const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const t = getToken();
-  if (t) {
-    config.headers.Authorization = `Bearer ${t}`;
-  }
+  if (t) config.headers.Authorization = `Bearer ${t}`;
   return config;
 });
 
-export async function register({ email, password, confirmPassword, fullName, organisation, role }) {
-  const { data } = await api.post('/api/register', { email, password, confirmPassword, fullName, organisation, role });
+export async function register(body) {
+  const { data } = await api.post('/api/auth/register', body);
   return data;
 }
 
 export async function login(email, password) {
-  const { data } = await api.post('/api/login', { email, password });
+  const { data } = await api.post('/api/auth/login', { email, password });
   return data;
 }
 
@@ -43,9 +41,7 @@ export async function analyzeMeeting({ title, text, file, projectId, scheduledAt
   if (scheduledAt) form.append('scheduled_at', scheduledAt);
   const url = `${baseURL || ''}/api/meetings/analyze`;
   const { data } = await axios.post(url, form, {
-    headers: {
-      Authorization: `Bearer ${getToken()}`,
-    },
+    headers: { Authorization: `Bearer ${getToken()}` },
   });
   return data;
 }
@@ -147,6 +143,72 @@ export async function getUserProfile() {
 
 export async function updateUserProfile(body) {
   const { data } = await api.patch('/api/user/profile', body);
+  return data;
+}
+
+// ── New v2 endpoints ──────────────────────────────────────────────────────────
+
+export async function getMe() {
+  const { data } = await api.get('/api/me');
+  return data;
+}
+
+export async function getMyAliases() {
+  const { data } = await api.get('/api/me/aliases');
+  return data;
+}
+
+export async function addAlias(alias) {
+  const { data } = await api.post('/api/me/aliases', { alias });
+  return data;
+}
+
+export async function removeAlias(alias) {
+  const { data } = await api.delete(`/api/me/aliases/${encodeURIComponent(alias)}`);
+  return data;
+}
+
+export async function getOrgRoster() {
+  const { data } = await api.get('/api/org/roster');
+  return data;
+}
+
+export async function inviteUser(role, email) {
+  const { data } = await api.post('/api/org/invite', { role, email });
+  return data;
+}
+
+export async function updateOrgUser(userId, body) {
+  const { data } = await api.patch(`/api/org/users/${userId}`, body);
+  return data;
+}
+
+export async function deactivateUser(userId) {
+  const { data } = await api.delete(`/api/org/users/${userId}`);
+  return data;
+}
+
+export async function getOrgBenchmarks(days = 30) {
+  const { data } = await api.get('/api/org/benchmarks', { params: { days } });
+  return data;
+}
+
+export async function requestReviewExport(userId, startDate, endDate) {
+  const response = await api.post(
+    '/api/org/review-export',
+    { userId, startDate, endDate },
+    { responseType: 'blob' }
+  );
+  return response.data;
+}
+
+export async function getPollStatus() {
+  const { data } = await api.get('/api/teams/poll-status');
+  return data;
+}
+
+export async function triggerPollNow() {
+  const { data } = await api.post('/api/teams/poll-now');
   return data;
 }
 
