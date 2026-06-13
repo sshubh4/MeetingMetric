@@ -107,11 +107,28 @@ function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-bg flex items-center justify-center p-4 relative overflow-hidden">
+
+      {/* Animated blob background */}
+      <div className="fixed inset-0 pointer-events-none" aria-hidden>
+        <div className="landing-blob-1 absolute -top-40 -left-40 w-[700px] h-[700px] rounded-full"
+          style={{ background: 'radial-gradient(circle at 40% 40%, rgba(245,158,11,0.45) 0%, rgba(245,158,11,0.12) 50%, transparent 72%)' }} />
+        <div className="landing-blob-2 absolute top-1/4 -right-48 w-[600px] h-[600px] rounded-full"
+          style={{ background: 'radial-gradient(circle at 55% 45%, rgba(251,146,60,0.30) 0%, rgba(251,146,60,0.07) 50%, transparent 72%)' }} />
+        <div className="landing-blob-3 absolute -bottom-32 left-1/4 w-[550px] h-[550px] rounded-full"
+          style={{ background: 'radial-gradient(circle, rgba(251,191,36,0.28) 0%, rgba(251,191,36,0.06) 50%, transparent 72%)' }} />
+        <div className="landing-glow-1 absolute top-20 right-1/3 w-80 h-80 rounded-full"
+          style={{ background: 'radial-gradient(circle, rgba(245,158,11,0.35) 0%, transparent 65%)' }} />
+        <div className="landing-glow-2 absolute bottom-1/4 left-1/3 w-64 h-64 rounded-full"
+          style={{ background: 'radial-gradient(circle, rgba(251,146,60,0.25) 0%, transparent 65%)' }} />
+        <div className="absolute inset-0 opacity-[0.04]"
+          style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
+      </div>
+
+      <div className="w-full max-w-md relative z-10">
         {/* Logo */}
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-white">
+          <h1 className="text-3xl font-cursive font-bold text-white tracking-wide">
             <span className="text-accent">Meeting</span>Metric
           </h1>
           <p className="text-muted text-sm mt-1">AI-powered meeting analytics</p>

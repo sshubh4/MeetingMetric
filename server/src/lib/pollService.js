@@ -1,6 +1,6 @@
 'use strict';
 
-const { analyzeTranscript } = require('./analyzePipeline');
+const { runMeetingPipeline } = require('./analyzePipeline');
 const { parseVtt } = require('./vttParser');
 
 class PollService {
@@ -90,9 +90,6 @@ class PollService {
       return;
     }
 
-    const { resolveAliases } = require('./db');
-    const aliasMap = orgId ? resolveAliases(orgId) : new Map();
-
     for (const meeting of meetings) {
       try {
         // Check for dedup
@@ -141,75 +138,22 @@ class PollService {
 
         const title = (meeting.subject || 'Teams Meeting').slice(0, 200);
 
-        let analysis;
+        let meetingId;
         try {
-          analysis = await analyzeTranscript(rawText, title);
-        } catch (e) {
-          this._log('warn', { userId, err: e.message }, 'analyzeTranscript failed');
-          continue;
-        }
-
-        const created_at = new Date().toISOString();
-
-        const rowM = this.db
-          .prepare(
-            `INSERT INTO meetings
-             (user_id, title, raw_text, summary, efficiency_score, dominant_speaker_alert,
-              low_engagement_alert, created_at, project_id, scheduled_at, uploaded_by,
-              source, teams_meeting_id, teams_transcript_id, org_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
-          )
-          .get(
-            userId,
-            title,
+          ({ meetingId } = await runMeetingPipeline({
             rawText,
-            analysis.summary ?? '',
-            Number(analysis.efficiency_score ?? 0),
-            analysis.dominant_speaker_alert ? 1 : 0,
-            analysis.low_engagement_alert ? 1 : 0,
-            created_at,
-            null,
-            meeting.startDateTime || null,
+            title,
             userId,
-            'teams_auto',
-            meeting.id,
-            transcripts[0].id,
-            orgId
-          );
-
-        const meetingId = rowM.id;
-
-        const insertS = this.db.prepare(
-          `INSERT INTO speaker_results
-           (meeting_id, speaker_name, word_count, turn_count, talk_ratio,
-            scores_json, utterance_breakdown_json, coaching_text, embedding_json,
-            user_id, org_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        );
-
-        for (const s of analysis.speakers) {
-          const speakerUserId = aliasMap.get(s.speaker_name) || null;
-          insertS.run(
-            meetingId,
-            s.speaker_name,
-            s.word_count,
-            s.turn_count,
-            s.talk_ratio,
-            JSON.stringify(s.scores),
-            JSON.stringify(s.utterance_breakdown),
-            s.coaching_text ?? '',
-            s.embedding_json ?? null,
-            speakerUserId,
-            orgId
-          );
-        }
-
-        const insertC = this.db.prepare(
-          `INSERT INTO meeting_chunks (meeting_id, chunk_index, text_snippet, embedding_json)
-           VALUES (?, ?, ?, ?)`
-        );
-        for (const c of analysis.chunkEmbeddings) {
-          insertC.run(meetingId, c.chunk_index, c.text_snippet, c.embedding_json);
+            orgId,
+            source: 'teams_auto',
+            scheduledAt: meeting.startDateTime || null,
+            uploadedBy: userId,
+            teamsMeetingId: meeting.id,
+            teamsTranscriptId: transcripts[0].id,
+          }));
+        } catch (e) {
+          this._log('warn', { userId, err: e.message }, 'runMeetingPipeline failed');
+          continue;
         }
 
         this._log(

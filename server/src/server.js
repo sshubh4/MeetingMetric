@@ -20,7 +20,7 @@ const {
   verifyToken,
   hashPassword,
 } = require('./lib/auth');
-const { analyzeTranscript } = require('./lib/analyzePipeline');
+const { runMeetingPipeline } = require('./lib/analyzePipeline');
 const { embedText, cosine } = require('./lib/embeddings');
 const TeamsService = require('./lib/teams');
 const PollService = require('./lib/pollService');
@@ -209,8 +209,19 @@ function formatMeeting(meetingId, userId) {
       word_count: s.word_count,
       turn_count: s.turn_count,
       talk_ratio: s.talk_ratio,
-      scores: JSON.parse(s.scores_json),
-      utterance_breakdown: JSON.parse(s.utterance_breakdown_json),
+      scores: {
+        engagement: s.score_engagement ?? 0,
+        sentiment: s.score_sentiment ?? 0,
+        collaboration: s.score_collaboration ?? 0,
+        initiative: s.score_initiative ?? 0,
+        clarity: s.score_clarity ?? 0,
+      },
+      utterance_breakdown: {
+        ideas: s.ub_ideas ?? 0,
+        questions: s.ub_questions ?? 0,
+        decisions: s.ub_decisions ?? 0,
+        filler: s.ub_filler ?? 0,
+      },
       coaching_text: s.coaching_text,
       user_id: s.user_id || null,
     }));
@@ -219,42 +230,6 @@ function formatMeeting(meetingId, userId) {
     raw_text: row.raw_text,
     speakers,
   };
-}
-
-function insertSpeakerResults(meetingId, speakers, orgId) {
-  const aliasMap = orgId ? resolveAliases(orgId) : new Map();
-  const insertS = db.prepare(`
-    INSERT INTO speaker_results
-    (meeting_id, speaker_name, word_count, turn_count, talk_ratio, scores_json,
-     utterance_breakdown_json, coaching_text, embedding_json, user_id, org_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  for (const s of speakers) {
-    const speakerUserId = aliasMap.get(s.speaker_name) || null;
-    insertS.run(
-      meetingId,
-      s.speaker_name,
-      s.word_count,
-      s.turn_count,
-      s.talk_ratio,
-      JSON.stringify(s.scores),
-      JSON.stringify(s.utterance_breakdown),
-      s.coaching_text,
-      s.embedding_json,
-      speakerUserId,
-      orgId
-    );
-  }
-}
-
-function insertChunks(meetingId, chunkEmbeddings) {
-  const insertC = db.prepare(
-    `INSERT INTO meeting_chunks (meeting_id, chunk_index, text_snippet, embedding_json)
-     VALUES (?, ?, ?, ?)`
-  );
-  for (const c of chunkEmbeddings) {
-    insertC.run(meetingId, c.chunk_index, c.text_snippet, c.embedding_json);
-  }
 }
 
 // ── AUTH ENDPOINTS ────────────────────────────────────────────────────────────
@@ -402,26 +377,25 @@ app.get('/api/me', requireAuth, (req, res) => {
     const meetingCount = myMeetings.length;
 
     const dimKeys = ['engagement', 'sentiment', 'collaboration', 'initiative', 'clarity'];
+    const colFor = (k) => `score_${k}`;
     const sumScores = { engagement: 0, sentiment: 0, collaboration: 0, initiative: 0, clarity: 0 };
     let scoreCount = 0;
 
     const trendAll = [];
     for (const row of myMeetings) {
-      let scores;
-      try { scores = JSON.parse(row.scores_json); } catch { scores = {}; }
       for (const k of dimKeys) {
-        sumScores[k] += scores[k] ?? 0;
+        sumScores[k] += row[colFor(k)] ?? 0;
       }
       scoreCount++;
       trendAll.push({
         meeting_title: row.title,
         meeting_date: row.scheduled_at || row.meeting_created_at,
         scores: {
-          engagement: Math.round((scores.engagement ?? 0) * 100),
-          sentiment: Math.round((scores.sentiment ?? 0) * 100),
-          collaboration: Math.round((scores.collaboration ?? 0) * 100),
-          initiative: Math.round((scores.initiative ?? 0) * 100),
-          clarity: Math.round((scores.clarity ?? 0) * 100),
+          engagement: Math.round((row.score_engagement ?? 0) * 100),
+          sentiment: Math.round((row.score_sentiment ?? 0) * 100),
+          collaboration: Math.round((row.score_collaboration ?? 0) * 100),
+          initiative: Math.round((row.score_initiative ?? 0) * 100),
+          clarity: Math.round((row.score_clarity ?? 0) * 100),
         },
       });
     }
@@ -433,29 +407,19 @@ app.get('/api/me', requireAuth, (req, res) => {
 
     const trendLast10 = trendAll.slice(0, 10);
 
-    // Percentiles vs org
+    // Percentiles vs org — one query per dimension, fully in SQL
     const percentiles = {};
     if (orgId) {
-      const orgRows = db
-        .prepare(
-          `SELECT sr.scores_json FROM speaker_results sr
-           JOIN meetings m ON m.id = sr.meeting_id
-           WHERE sr.org_id = ?`
-        )
-        .all(orgId);
-
       for (const k of dimKeys) {
-        const allVals = [];
-        for (const r of orgRows) {
-          try {
-            const s = JSON.parse(r.scores_json);
-            if (typeof s[k] === 'number') allVals.push(s[k]);
-          } catch { /* skip */ }
-        }
-        allVals.sort((a, b) => a - b);
-        const myVal = avgScores[k];
-        const below = allVals.filter((v) => v <= myVal).length;
-        percentiles[k] = allVals.length ? Math.round((below / allVals.length) * 100) : 50;
+        const col = colFor(k);
+        const row = db
+          .prepare(
+            `SELECT COUNT(*) AS total, SUM(CASE WHEN ${col} <= ? THEN 1 ELSE 0 END) AS below
+             FROM speaker_results
+             WHERE org_id = ? AND ${col} IS NOT NULL`
+          )
+          .get(avgScores[k], orgId);
+        percentiles[k] = row.total ? Math.round((row.below / row.total) * 100) : 50;
       }
     } else {
       for (const k of dimKeys) percentiles[k] = 50;
@@ -556,13 +520,15 @@ app.get('/api/org/roster', requireAuth, requireRole('hr', 'admin'), (req, res) =
       .prepare(
         `SELECT u.id, u.email, u.full_name, u.role, u.active, u.manager_id, u.joined_at,
                 m.full_name AS manager_name,
-                (SELECT COUNT(*) FROM speaker_results sr WHERE sr.user_id = u.id) AS meeting_count,
-                (SELECT AVG(json_extract(sr2.scores_json, '$.engagement'))
-                 FROM speaker_results sr2 WHERE sr2.user_id = u.id) AS avg_engagement,
-                (SELECT COUNT(*) FROM teams_tokens tt WHERE tt.user_id = u.id AND tt.access_token IS NOT NULL) AS teams_connected
+                COUNT(DISTINCT sr.id) AS meeting_count,
+                AVG(sr.score_engagement) AS avg_engagement,
+                COUNT(DISTINCT tt.user_id) AS teams_connected
          FROM users u
          LEFT JOIN users m ON m.id = u.manager_id
+         LEFT JOIN speaker_results sr ON sr.user_id = u.id
+         LEFT JOIN teams_tokens tt ON tt.user_id = u.id AND tt.access_token IS NOT NULL
          WHERE u.org_id = ?
+         GROUP BY u.id
          ORDER BY u.full_name`
       )
       .all(orgId);
@@ -700,55 +666,40 @@ app.get('/api/org/benchmarks', requireAuth, (req, res) => {
       return res.json(cached.data);
     }
 
-    const rows = db
+    const agg = db
       .prepare(
-        `SELECT sr.scores_json, sr.user_id
+        `SELECT AVG(sr.score_engagement)    AS avg_engagement,
+                AVG(sr.score_sentiment)     AS avg_sentiment,
+                AVG(sr.score_collaboration) AS avg_collaboration,
+                AVG(sr.score_initiative)    AS avg_initiative,
+                AVG(sr.score_clarity)       AS avg_clarity,
+                COUNT(DISTINCT m.id)        AS meeting_count,
+                COUNT(DISTINCT sr.user_id)  AS participant_count
          FROM speaker_results sr
          JOIN meetings m ON m.id = sr.meeting_id
          WHERE sr.org_id = ?
-           AND datetime(COALESCE(m.scheduled_at, m.created_at)) > datetime('now', '-${days} day')`
+           AND datetime(COALESCE(m.scheduled_at, m.created_at)) > datetime('now', '-' || ? || ' day')`
       )
-      .all(orgId);
+      .get(orgId, days);
 
     const meetingCount = db
       .prepare(
-        `SELECT COUNT(DISTINCT m.id) AS c
-         FROM meetings m
-         WHERE m.org_id = ?
-           AND datetime(COALESCE(m.scheduled_at, m.created_at)) > datetime('now', '-${days} day')`
+        `SELECT COUNT(*) AS c FROM meetings
+         WHERE org_id = ?
+           AND datetime(COALESCE(scheduled_at, created_at)) > datetime('now', '-' || ? || ' day')`
       )
-      .get(orgId)?.c || 0;
+      .get(orgId, days)?.c || 0;
 
-    const participantCount = db
-      .prepare(
-        `SELECT COUNT(DISTINCT sr.user_id) AS c
-         FROM speaker_results sr
-         JOIN meetings m ON m.id = sr.meeting_id
-         WHERE sr.org_id = ? AND sr.user_id IS NOT NULL
-           AND datetime(COALESCE(m.scheduled_at, m.created_at)) > datetime('now', '-${days} day')`
-      )
-      .get(orgId)?.c || 0;
-
-    const dims = ['engagement', 'sentiment', 'collaboration', 'initiative', 'clarity'];
-    const sums = { engagement: 0, sentiment: 0, collaboration: 0, initiative: 0, clarity: 0 };
-    let n = 0;
-    for (const r of rows) {
-      try {
-        const s = JSON.parse(r.scores_json);
-        for (const k of dims) sums[k] += s[k] ?? 0;
-        n++;
-      } catch { /* skip */ }
-    }
-
+    const r2 = (v) => (v != null ? Math.round(v * 100) / 100 : null);
     const data = {
       days,
-      avgEngagement: n ? Math.round((sums.engagement / n) * 100) / 100 : null,
-      avgSentiment: n ? Math.round((sums.sentiment / n) * 100) / 100 : null,
-      avgCollaboration: n ? Math.round((sums.collaboration / n) * 100) / 100 : null,
-      avgInitiative: n ? Math.round((sums.initiative / n) * 100) / 100 : null,
-      avgClarity: n ? Math.round((sums.clarity / n) * 100) / 100 : null,
+      avgEngagement: r2(agg?.avg_engagement),
+      avgSentiment: r2(agg?.avg_sentiment),
+      avgCollaboration: r2(agg?.avg_collaboration),
+      avgInitiative: r2(agg?.avg_initiative),
+      avgClarity: r2(agg?.avg_clarity),
       meetingCount,
-      participantCount,
+      participantCount: agg?.participant_count || 0,
     };
 
     benchmarksCache.set(cacheKey, { ts: Date.now(), data });
@@ -779,7 +730,9 @@ app.post('/api/org/review-export', requireAuth, requireRole('hr', 'admin'), vali
     // Get speaker results in date range
     const rows = db
       .prepare(
-        `SELECT sr.scores_json, sr.coaching_text, m.title, m.scheduled_at, m.created_at
+        `SELECT sr.score_engagement, sr.score_sentiment, sr.score_collaboration,
+                sr.score_initiative, sr.score_clarity,
+                sr.coaching_text, m.title, m.scheduled_at, m.created_at
          FROM speaker_results sr
          JOIN meetings m ON m.id = sr.meeting_id
          WHERE sr.user_id = ? AND sr.org_id = ?
@@ -790,7 +743,13 @@ app.post('/api/org/review-export', requireAuth, requireRole('hr', 'admin'), vali
       .all(userId, orgId, startDate, endDate);
 
     const dims = ['engagement', 'sentiment', 'collaboration', 'initiative', 'clarity'];
-    const allScores = rows.map((r) => { try { return JSON.parse(r.scores_json); } catch { return {}; } });
+    const allScores = rows.map((r) => ({
+      engagement: r.score_engagement ?? 0,
+      sentiment: r.score_sentiment ?? 0,
+      collaboration: r.score_collaboration ?? 0,
+      initiative: r.score_initiative ?? 0,
+      clarity: r.score_clarity ?? 0,
+    }));
     const avgS = {};
     for (const k of dims) {
       avgS[k] = allScores.length ? Math.round(avg(allScores.map((s) => s[k] ?? 0)) * 100) : 0;
@@ -813,18 +772,17 @@ app.post('/api/org/review-export', requireAuth, requireRole('hr', 'admin'), vali
       .slice(-3)
       .map((r) => r.coaching_text);
 
-    // Percentiles vs org
-    const orgRows = db
-      .prepare(`SELECT scores_json FROM speaker_results WHERE org_id = ?`)
-      .all(orgId);
+    // Percentiles vs org — computed in SQL on the normalized columns
     const percentiles = {};
     for (const k of dims) {
-      const allVals = orgRows
-        .map((r) => { try { return JSON.parse(r.scores_json)[k] ?? 0; } catch { return 0; } })
-        .sort((a, b) => a - b);
-      const myVal = avgS[k] / 100;
-      const below = allVals.filter((v) => v <= myVal).length;
-      percentiles[k] = allVals.length ? Math.round((below / allVals.length) * 100) : 50;
+      const col = `score_${k}`;
+      const row = db
+        .prepare(
+          `SELECT COUNT(*) AS total, SUM(CASE WHEN COALESCE(${col}, 0) <= ? THEN 1 ELSE 0 END) AS below
+           FROM speaker_results WHERE org_id = ?`
+        )
+        .get(avgS[k] / 100, orgId);
+      percentiles[k] = row.total ? Math.round((row.below / row.total) * 100) : 50;
     }
 
     // Build PDF
@@ -934,25 +892,17 @@ app.post('/api/meetings/analyze', requireAuth, upload.single('file'), async (req
     rawText = rawText.trim();
     if (!rawText) return res.status(400).json({ error: 'Provide transcript text or a file' });
 
-    const analysis = await analyzeTranscript(rawText, title);
-    const created_at = new Date().toISOString();
     const orgId = req.user.orgId || null;
-
-    const rowM = db
-      .prepare(
-        `INSERT INTO meetings (user_id, title, raw_text, summary, efficiency_score, dominant_speaker_alert,
-          low_engagement_alert, created_at, project_id, scheduled_at, uploaded_by, source, org_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
-      )
-      .get(
-        req.user.id, title, rawText, analysis.summary, analysis.efficiency_score,
-        analysis.dominant_speaker_alert, analysis.low_engagement_alert, created_at,
-        projectId, scheduledAt, req.user.id, 'manual', orgId
-      );
-    const meetingId = rowM.id;
-
-    insertSpeakerResults(meetingId, analysis.speakers, orgId);
-    insertChunks(meetingId, analysis.chunkEmbeddings);
+    const { meetingId } = await runMeetingPipeline({
+      rawText,
+      title,
+      userId: req.user.id,
+      orgId,
+      source: 'manual',
+      projectId,
+      scheduledAt,
+      uploadedBy: req.user.id,
+    });
 
     logger.info({ userId: req.user.id, meetingId, orgId }, 'Meeting analyzed');
     res.status(201).json({ meetingId, meeting: formatMeeting(meetingId, req.user.id) });
@@ -1020,7 +970,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       ).all(userId);
 
       speakers = db.prepare(
-        `SELECT sr.speaker_name, sr.scores_json, sr.talk_ratio, sr.word_count, m.created_at
+        `SELECT sr.speaker_name, sr.score_engagement, sr.talk_ratio, sr.word_count, m.created_at
          FROM speaker_results sr
          JOIN meetings m ON m.id = sr.meeting_id
          WHERE sr.user_id = ?
@@ -1045,7 +995,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       ).all(...ids);
 
       speakers = db.prepare(
-        `SELECT sr.speaker_name, sr.scores_json, sr.talk_ratio, sr.word_count, m.created_at
+        `SELECT sr.speaker_name, sr.score_engagement, sr.talk_ratio, sr.word_count, m.created_at
          FROM speaker_results sr
          JOIN meetings m ON m.id = sr.meeting_id
          WHERE sr.user_id IN (${placeholders})
@@ -1058,7 +1008,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
           `SELECT id, efficiency_score, created_at FROM meetings WHERE org_id = ? ORDER BY created_at DESC LIMIT 50`
         ).all(orgId);
         speakers = db.prepare(
-          `SELECT sr.speaker_name, sr.scores_json, sr.talk_ratio, sr.word_count, m.created_at
+          `SELECT sr.speaker_name, sr.score_engagement, sr.talk_ratio, sr.word_count, m.created_at
            FROM speaker_results sr
            JOIN meetings m ON m.id = sr.meeting_id
            WHERE sr.org_id = ?
@@ -1069,7 +1019,7 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
           `SELECT id, efficiency_score, created_at FROM meetings WHERE user_id = ? ORDER BY created_at DESC LIMIT 50`
         ).all(userId);
         speakers = db.prepare(
-          `SELECT sr.speaker_name, sr.scores_json, sr.talk_ratio, sr.word_count, m.created_at
+          `SELECT sr.speaker_name, sr.score_engagement, sr.talk_ratio, sr.word_count, m.created_at
            FROM speaker_results sr
            JOIN meetings m ON m.id = sr.meeting_id
            WHERE m.user_id = ?
@@ -1079,13 +1029,12 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
     }
 
     const bySpeaker = new Map();
-    for (const { speaker_name, scores_json, talk_ratio, word_count } of speakers) {
+    for (const { speaker_name, score_engagement, talk_ratio, word_count } of speakers) {
       if (!bySpeaker.has(speaker_name)) {
         bySpeaker.set(speaker_name, { name: speaker_name, engagements: [], talkRatios: [], wordCounts: [] });
       }
       const b = bySpeaker.get(speaker_name);
-      const scores = JSON.parse(scores_json);
-      b.engagements.push(scores.engagement);
+      b.engagements.push(score_engagement ?? 0);
       b.talkRatios.push(talk_ratio);
       b.wordCounts.push(word_count);
     }
@@ -1108,32 +1057,29 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
       id: m.id,
     }));
 
-    const filterClause = orgId && role !== 'employee'
-      ? `org_id = ${db.prepare('SELECT org_id FROM users WHERE id = ?').get(userId)?.org_id || 0}`
-      : `user_id = ${userId}`;
+    // Parameterized scope filter: org-wide for managers and above, personal otherwise
+    const orgScoped = !!(orgId && role !== 'employee');
+    const scopeSql = orgScoped ? 'org_id = ?' : 'user_id = ?';
+    const scopeParam = orgScoped ? orgId : userId;
 
     const last30 = db
-      .prepare(`SELECT COUNT(*) AS c, AVG(efficiency_score) AS avg_eff FROM meetings WHERE ${filterClause} AND datetime(created_at) > datetime('now', '-30 day')`)
-      .get();
+      .prepare(`SELECT COUNT(*) AS c, AVG(efficiency_score) AS avg_eff FROM meetings WHERE ${scopeSql} AND datetime(created_at) > datetime('now', '-30 day')`)
+      .get(scopeParam);
 
     let engSum = 0, engN = 0;
     for (const row of speakers) {
-      try {
-        const sc = JSON.parse(row.scores_json);
-        if (typeof sc.engagement === 'number') { engSum += sc.engagement; engN++; }
-      } catch { /* skip */ }
+      if (typeof row.score_engagement === 'number') { engSum += row.score_engagement; engN++; }
     }
     const liveParticipation = engN ? Math.round((engSum / engN) * 100) : null;
 
     const uniqueParticipants = bySpeaker.size;
 
-    const alertBase = orgId && role !== 'employee' ? `org_id = ${orgId}` : `user_id = ${userId}`;
     const recentDominance = db.prepare(
-      `SELECT COUNT(*) as c FROM meetings WHERE ${alertBase} AND dominant_speaker_alert = 1 AND datetime(created_at) > datetime('now', '-30 day')`
-    ).get().c;
+      `SELECT COUNT(*) as c FROM meetings WHERE ${scopeSql} AND dominant_speaker_alert = 1 AND datetime(created_at) > datetime('now', '-30 day')`
+    ).get(scopeParam).c;
     const recentLowEngagement = db.prepare(
-      `SELECT COUNT(*) as c FROM meetings WHERE ${alertBase} AND low_engagement_alert = 1 AND datetime(created_at) > datetime('now', '-30 day')`
-    ).get().c;
+      `SELECT COUNT(*) as c FROM meetings WHERE ${scopeSql} AND low_engagement_alert = 1 AND datetime(created_at) > datetime('now', '-30 day')`
+    ).get(scopeParam).c;
 
     res.json({
       meetingCount: meetings.length,
@@ -1158,35 +1104,30 @@ app.get('/api/dashboard', requireAuth, (req, res) => {
 app.get('/api/calendar', requireAuth, (req, res) => {
   const month = (req.query.month || '').trim();
   if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'Query month=YYYY-MM required' });
-  const [y, mo] = month.split('-').map(Number);
-  const start = new Date(y, mo - 1, 1);
-  const end = new Date(y, mo, 0, 23, 59, 59, 999);
   const orgId = req.user.orgId;
 
+  // Month filtering in SQL on scheduled_at with created_at fallback
+  const monthCond = `strftime('%Y-%m', COALESCE(m.scheduled_at, m.created_at)) = ?`;
   let rows;
   if (orgId) {
     rows = db.prepare(
       `SELECT m.id, m.title, m.efficiency_score, m.created_at, m.scheduled_at,
               m.project_id, p.name AS project_name, p.color AS project_color
        FROM meetings m LEFT JOIN projects p ON p.id = m.project_id
-       WHERE m.user_id = ? OR m.org_id = ?`
-    ).all(req.user.id, orgId);
+       WHERE (m.user_id = ? OR m.org_id = ?) AND ${monthCond}`
+    ).all(req.user.id, orgId, month);
   } else {
     rows = db.prepare(
       `SELECT m.id, m.title, m.efficiency_score, m.created_at, m.scheduled_at,
               m.project_id, p.name AS project_name, p.color AS project_color
        FROM meetings m LEFT JOIN projects p ON p.id = m.project_id
-       WHERE m.user_id = ?`
-    ).all(req.user.id);
+       WHERE m.user_id = ? AND ${monthCond}`
+    ).all(req.user.id, month);
   }
 
-  const inMonth = rows.filter((r) => {
-    const d = new Date(r.scheduled_at || r.created_at);
-    return d >= start && d <= end;
-  });
   res.json({
     month,
-    meetings: inMonth.map((r) => ({ ...formatMeetingRow(r), calendar_date: r.scheduled_at || r.created_at })),
+    meetings: rows.map((r) => ({ ...formatMeetingRow(r), calendar_date: r.scheduled_at || r.created_at })),
   });
 });
 
@@ -1241,7 +1182,9 @@ app.get('/api/projects/:id/detail', requireAuth, (req, res) => {
     ).all(pid, req.user.id);
 
     const speakers = db.prepare(
-      `SELECT sr.speaker_name, sr.scores_json, sr.talk_ratio, sr.word_count, sr.turn_count, m.id AS meeting_id
+      `SELECT sr.speaker_name, sr.talk_ratio, sr.word_count, sr.turn_count, m.id AS meeting_id,
+              sr.score_engagement, sr.score_sentiment, sr.score_collaboration,
+              sr.score_initiative, sr.score_clarity
        FROM speaker_results sr
        JOIN meetings m ON m.id = sr.meeting_id
        WHERE m.project_id = ? AND m.user_id = ?`
@@ -1250,7 +1193,16 @@ app.get('/api/projects/:id/detail', requireAuth, (req, res) => {
     const byName = new Map();
     for (const s of speakers) {
       if (!byName.has(s.speaker_name)) byName.set(s.speaker_name, []);
-      byName.get(s.speaker_name).push({ ...s, scores: JSON.parse(s.scores_json) });
+      byName.get(s.speaker_name).push({
+        ...s,
+        scores: {
+          engagement: s.score_engagement ?? 0,
+          sentiment: s.score_sentiment ?? 0,
+          collaboration: s.score_collaboration ?? 0,
+          initiative: s.score_initiative ?? 0,
+          clarity: s.score_clarity ?? 0,
+        },
+      });
     }
 
     const participantStats = [];
@@ -1356,8 +1308,10 @@ app.get('/api/team/participants', requireAuth, (req, res) => {
     if (project_id) { meetingFilter += ' AND m.project_id = ?'; params.push(Number(project_id)); }
 
     const rows = db.prepare(`
-      SELECT sr.speaker_name, sr.scores_json, sr.talk_ratio, sr.word_count, sr.turn_count,
+      SELECT sr.speaker_name, sr.talk_ratio, sr.word_count, sr.turn_count,
              sr.coaching_text, sr.user_id AS speaker_user_id,
+             sr.score_engagement, sr.score_sentiment, sr.score_collaboration,
+             sr.score_initiative, sr.score_clarity,
              m.id AS meeting_id, m.title AS meeting_title,
              COALESCE(m.scheduled_at, m.created_at) AS meeting_date,
              m.project_id, p.name AS project_name, p.color AS project_color
@@ -1374,7 +1328,13 @@ app.get('/api/team/participants', requireAuth, (req, res) => {
         byName.set(r.speaker_name, { name: r.speaker_name, meetings: [], projects: new Set() });
       }
       const entry = byName.get(r.speaker_name);
-      const scores = JSON.parse(r.scores_json);
+      const scores = {
+        engagement: r.score_engagement ?? 0,
+        sentiment: r.score_sentiment ?? 0,
+        collaboration: r.score_collaboration ?? 0,
+        initiative: r.score_initiative ?? 0,
+        clarity: r.score_clarity ?? 0,
+      };
       entry.meetings.push({
         meeting_id: r.meeting_id, meeting_title: r.meeting_title,
         meeting_date: r.meeting_date, project_id: r.project_id,
@@ -1429,58 +1389,73 @@ app.get('/api/reports', requireAuth, (req, res) => {
     if (from) { meetingFilter += ' AND date(COALESCE(m.scheduled_at, m.created_at)) >= ?'; params.push(from); }
     if (to)   { meetingFilter += ' AND date(COALESCE(m.scheduled_at, m.created_at)) <= ?'; params.push(to); }
 
+    // One LEFT JOIN + GROUP BY: meetings with per-meeting score averages
+    // (replaces the previous per-meeting query inside a .map loop)
     const meetings = db.prepare(
       `SELECT m.id, m.title, m.efficiency_score, m.created_at, m.scheduled_at,
-              p.name AS project_name, p.color AS project_color
-       FROM meetings m LEFT JOIN projects p ON p.id = m.project_id
+              p.name AS project_name, p.color AS project_color,
+              AVG(sr.score_engagement)    AS avg_engagement,
+              AVG(sr.score_sentiment)     AS avg_sentiment,
+              AVG(sr.score_collaboration) AS avg_collaboration,
+              AVG(sr.score_initiative)    AS avg_initiative,
+              AVG(sr.score_clarity)       AS avg_clarity
+       FROM meetings m
+       LEFT JOIN projects p ON p.id = m.project_id
+       LEFT JOIN speaker_results sr ON sr.meeting_id = m.id
        ${meetingFilter}
+       GROUP BY m.id
        ORDER BY COALESCE(m.scheduled_at, m.created_at) ASC`
     ).all(...params);
 
-    const dimensionTrends = meetings.map((m) => {
-      const sRows = db.prepare('SELECT scores_json FROM speaker_results WHERE meeting_id = ?').all(m.id);
-      const sc = (key) => sRows.length
-        ? avg(sRows.map((r) => { try { return JSON.parse(r.scores_json)[key] ?? 0; } catch { return 0; } }))
-        : 0;
-      return {
-        id: m.id, title: m.title, date: (m.scheduled_at || m.created_at).slice(0, 10),
-        efficiency: Math.round((m.efficiency_score ?? 0) * 100),
-        engagement: Math.round(sc('engagement') * 100), sentiment: Math.round(sc('sentiment') * 100),
-        collaboration: Math.round(sc('collaboration') * 100), initiative: Math.round(sc('initiative') * 100),
-        clarity: Math.round(sc('clarity') * 100),
-      };
-    });
+    const dimensionTrends = meetings.map((m) => ({
+      id: m.id, title: m.title, date: (m.scheduled_at || m.created_at).slice(0, 10),
+      efficiency: Math.round((m.efficiency_score ?? 0) * 100),
+      engagement: Math.round((m.avg_engagement ?? 0) * 100),
+      sentiment: Math.round((m.avg_sentiment ?? 0) * 100),
+      collaboration: Math.round((m.avg_collaboration ?? 0) * 100),
+      initiative: Math.round((m.avg_initiative ?? 0) * 100),
+      clarity: Math.round((m.avg_clarity ?? 0) * 100),
+    }));
 
-    const speakerRows = db.prepare(
-      `SELECT sr.speaker_name, sr.scores_json, sr.talk_ratio
+    // Per-participant aggregation done in SQL
+    const participantRows = db.prepare(
+      `SELECT sr.speaker_name AS name, COUNT(*) AS meeting_count,
+              AVG(COALESCE(sr.score_engagement, 0))    AS avg_engagement,
+              AVG(COALESCE(sr.score_sentiment, 0))     AS avg_sentiment,
+              AVG(COALESCE(sr.score_collaboration, 0)) AS avg_collaboration,
+              AVG(COALESCE(sr.score_initiative, 0))    AS avg_initiative,
+              AVG(COALESCE(sr.score_clarity, 0))       AS avg_clarity,
+              AVG(COALESCE(sr.talk_ratio, 0))          AS avg_talk_ratio
        FROM speaker_results sr
        JOIN meetings m ON m.id = sr.meeting_id
-       ${meetingFilter}`
+       ${meetingFilter}
+       GROUP BY sr.speaker_name`
     ).all(...params);
 
-    const byName = new Map();
-    for (const r of speakerRows) {
-      if (!byName.has(r.speaker_name)) byName.set(r.speaker_name, { name: r.speaker_name, rows: [] });
-      byName.get(r.speaker_name).rows.push(r);
-    }
-
-    const participants = [];
-    for (const [, v] of byName) {
-      const scores = v.rows.map((r) => { try { return JSON.parse(r.scores_json); } catch { return {}; } });
-      participants.push({
-        name: v.name, meeting_count: v.rows.length,
-        avg_engagement: Math.round(avg(scores.map((s) => s.engagement ?? 0)) * 100) / 100,
-        avg_sentiment: Math.round(avg(scores.map((s) => s.sentiment ?? 0)) * 100) / 100,
-        avg_collaboration: Math.round(avg(scores.map((s) => s.collaboration ?? 0)) * 100) / 100,
-        avg_initiative: Math.round(avg(scores.map((s) => s.initiative ?? 0)) * 100) / 100,
-        avg_clarity: Math.round(avg(scores.map((s) => s.clarity ?? 0)) * 100) / 100,
-        avg_talk_ratio: Math.round(avg(v.rows.map((r) => r.talk_ratio ?? 0)) * 100) / 100,
-      });
-    }
+    const participants = participantRows.map((r) => ({
+      name: r.name, meeting_count: r.meeting_count,
+      avg_engagement: Math.round(r.avg_engagement * 100) / 100,
+      avg_sentiment: Math.round(r.avg_sentiment * 100) / 100,
+      avg_collaboration: Math.round(r.avg_collaboration * 100) / 100,
+      avg_initiative: Math.round(r.avg_initiative * 100) / 100,
+      avg_clarity: Math.round(r.avg_clarity * 100) / 100,
+      avg_talk_ratio: Math.round(r.avg_talk_ratio * 100) / 100,
+    }));
     participants.sort((a, b) => b.avg_engagement - a.avg_engagement);
 
     const ranked = [...meetings].filter((m) => m.efficiency_score != null).sort((a, b) => b.efficiency_score - a.efficiency_score);
     const fmt = (m) => ({ id: m.id, title: m.title, efficiency: Math.round(m.efficiency_score * 100), date: (m.scheduled_at || m.created_at).slice(0, 10), project_name: m.project_name || null });
+
+    // Project-level engagement averaged across speaker rows, in SQL
+    const projectEngRows = db.prepare(
+      `SELECT COALESCE(p.name, 'Unassigned') AS name, AVG(sr.score_engagement) AS avg_engagement
+       FROM speaker_results sr
+       JOIN meetings m ON m.id = sr.meeting_id
+       LEFT JOIN projects p ON p.id = m.project_id
+       ${meetingFilter}
+       GROUP BY COALESCE(p.name, 'Unassigned')`
+    ).all(...params);
+    const projectEng = new Map(projectEngRows.map((r) => [r.name, r.avg_engagement]));
 
     const projectMap = new Map();
     for (const m of meetings) {
@@ -1491,12 +1466,11 @@ app.get('/api/reports', requireAuth, (req, res) => {
     const projectBreakdown = [];
     for (const [, pv] of projectMap) {
       const eff = pv.meetings.filter((m) => m.efficiency_score != null).map((m) => m.efficiency_score);
-      const pSpeakers = pv.meetings.flatMap((m) => db.prepare('SELECT scores_json FROM speaker_results WHERE meeting_id = ?').all(m.id));
-      const eng = pSpeakers.map((s) => { try { return JSON.parse(s.scores_json).engagement ?? 0; } catch { return 0; } });
+      const eng = projectEng.get(pv.name);
       projectBreakdown.push({
         name: pv.name, color: pv.color, meeting_count: pv.meetings.length,
         avg_efficiency: eff.length ? Math.round(avg(eff) * 100) : null,
-        avg_engagement: eng.length ? Math.round(avg(eng) * 100) : null,
+        avg_engagement: eng != null ? Math.round(eng * 100) : null,
       });
     }
 
@@ -1505,7 +1479,7 @@ app.get('/api/reports', requireAuth, (req, res) => {
       summary: {
         totalMeetings: meetings.length,
         avgEfficiency: allEff.length ? Math.round(avg(allEff) * 100) : null,
-        totalParticipants: byName.size,
+        totalParticipants: participants.length,
         dateRange: meetings.length ? {
           from: (meetings[0].scheduled_at || meetings[0].created_at).slice(0, 10),
           to: (meetings[meetings.length - 1].scheduled_at || meetings[meetings.length - 1].created_at).slice(0, 10),
@@ -1612,25 +1586,20 @@ app.post('/api/teams/import', requireAuth, async (req, res) => {
     if (!rawText.trim()) return res.status(404).json({ error: 'Transcript was empty after parsing' });
 
     const title = (subject || 'Teams meeting').slice(0, 200);
-    const analysis = await analyzeTranscript(rawText, title);
-    const created_at = new Date().toISOString();
     const scheduledAt = transcripts[0].createdDateTime || null;
     const orgId = req.user.orgId || null;
 
-    const rowM = db.prepare(
-      `INSERT INTO meetings (user_id, title, raw_text, summary, efficiency_score, dominant_speaker_alert,
-        low_engagement_alert, created_at, project_id, scheduled_at, uploaded_by, source,
-        teams_meeting_id, teams_transcript_id, org_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
-    ).get(
-      req.user.id, title, rawText, analysis.summary, analysis.efficiency_score,
-      analysis.dominant_speaker_alert, analysis.low_engagement_alert, created_at,
-      null, scheduledAt, req.user.id, 'teams_import', meetingId, transcripts[0].id, orgId
-    );
-
-    const newMeetingId = rowM.id;
-    insertSpeakerResults(newMeetingId, analysis.speakers, orgId);
-    insertChunks(newMeetingId, analysis.chunkEmbeddings);
+    const { meetingId: newMeetingId } = await runMeetingPipeline({
+      rawText,
+      title,
+      userId: req.user.id,
+      orgId,
+      source: 'teams_import',
+      scheduledAt,
+      uploadedBy: req.user.id,
+      teamsMeetingId: meetingId,
+      teamsTranscriptId: transcripts[0].id,
+    });
 
     logger.info({ userId: req.user.id, meetingId: newMeetingId }, 'Teams meeting imported');
     res.status(201).json({ meetingId: newMeetingId, meeting: formatMeeting(newMeetingId, req.user.id) });
@@ -1717,20 +1686,15 @@ app.post('/api/bot/transcript', async (req, res) => {
     const orgId = userRow?.org_id || null;
 
     const meetingTitle = (title || 'Teams Live Meeting').slice(0, 200);
-    const analysis = await analyzeTranscript(rawText, meetingTitle);
-    const created_at = new Date().toISOString();
-
-    const rowM = db.prepare(
-      `INSERT INTO meetings (user_id, title, raw_text, summary, efficiency_score, dominant_speaker_alert,
-        low_engagement_alert, created_at, project_id, scheduled_at, uploaded_by, source, org_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
-    ).get(userId, meetingTitle, rawText, analysis.summary, analysis.efficiency_score,
-      analysis.dominant_speaker_alert, analysis.low_engagement_alert, created_at,
-      null, created_at, userId, 'bot', orgId);
-
-    const newId = rowM.id;
-    insertSpeakerResults(newId, analysis.speakers, orgId);
-    insertChunks(newId, analysis.chunkEmbeddings);
+    const { meetingId: newId } = await runMeetingPipeline({
+      rawText,
+      title: meetingTitle,
+      userId,
+      orgId,
+      source: 'bot',
+      scheduledAt: new Date().toISOString(),
+      uploadedBy: userId,
+    });
 
     res.status(201).json({ meetingId: newId, message: 'Transcript received and analyzed' });
   } catch (e) {

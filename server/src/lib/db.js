@@ -145,6 +145,35 @@ const speakerCols = tableColumns('speaker_results');
 if (!speakerCols.includes('user_id')) db.exec('ALTER TABLE speaker_results ADD COLUMN user_id INTEGER');
 if (!speakerCols.includes('org_id'))  db.exec('ALTER TABLE speaker_results ADD COLUMN org_id INTEGER');
 
+// Normalized score + utterance-breakdown columns (previously only inside
+// scores_json / utterance_breakdown_json). All reads go through these;
+// the JSON columns are still written for backward compatibility.
+if (!speakerCols.includes('score_engagement'))    db.exec('ALTER TABLE speaker_results ADD COLUMN score_engagement REAL');
+if (!speakerCols.includes('score_sentiment'))     db.exec('ALTER TABLE speaker_results ADD COLUMN score_sentiment REAL');
+if (!speakerCols.includes('score_collaboration')) db.exec('ALTER TABLE speaker_results ADD COLUMN score_collaboration REAL');
+if (!speakerCols.includes('score_initiative'))    db.exec('ALTER TABLE speaker_results ADD COLUMN score_initiative REAL');
+if (!speakerCols.includes('score_clarity'))       db.exec('ALTER TABLE speaker_results ADD COLUMN score_clarity REAL');
+if (!speakerCols.includes('ub_ideas'))            db.exec('ALTER TABLE speaker_results ADD COLUMN ub_ideas INTEGER');
+if (!speakerCols.includes('ub_questions'))        db.exec('ALTER TABLE speaker_results ADD COLUMN ub_questions INTEGER');
+if (!speakerCols.includes('ub_decisions'))        db.exec('ALTER TABLE speaker_results ADD COLUMN ub_decisions INTEGER');
+if (!speakerCols.includes('ub_filler'))           db.exec('ALTER TABLE speaker_results ADD COLUMN ub_filler INTEGER');
+
+// One-time backfill of the normalized columns from the legacy JSON blobs.
+// Guarded by score_engagement IS NULL so it only touches unmigrated rows.
+db.exec(`
+  UPDATE speaker_results SET
+    score_engagement    = json_extract(scores_json, '$.engagement'),
+    score_sentiment     = json_extract(scores_json, '$.sentiment'),
+    score_collaboration = json_extract(scores_json, '$.collaboration'),
+    score_initiative    = json_extract(scores_json, '$.initiative'),
+    score_clarity       = json_extract(scores_json, '$.clarity'),
+    ub_ideas            = json_extract(utterance_breakdown_json, '$.ideas'),
+    ub_questions        = json_extract(utterance_breakdown_json, '$.questions'),
+    ub_decisions        = json_extract(utterance_breakdown_json, '$.decisions'),
+    ub_filler           = json_extract(utterance_breakdown_json, '$.filler')
+  WHERE score_engagement IS NULL;
+`);
+
 const projectCols = tableColumns('projects');
 if (!projectCols.includes('department')) db.exec('ALTER TABLE projects ADD COLUMN department TEXT');
 
@@ -156,6 +185,27 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_speaker_results_user ON speaker_results(user_id);
   CREATE INDEX IF NOT EXISTS idx_speaker_aliases_user ON speaker_aliases(user_id);
   CREATE INDEX IF NOT EXISTS idx_speaker_aliases_org  ON speaker_aliases(org_id);
+
+  CREATE INDEX IF NOT EXISTS idx_meetings_created     ON meetings(created_at);
+  CREATE INDEX IF NOT EXISTS idx_meetings_org_created ON meetings(org_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_sr_org               ON speaker_results(org_id);
+  CREATE INDEX IF NOT EXISTS idx_sr_user_meeting      ON speaker_results(user_id, meeting_id);
+`);
+
+// ── Pipeline run telemetry ─────────────────────────────────────────────────────
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    meeting_id INTEGER, org_id INTEGER,
+    started_at TEXT NOT NULL, completed_at TEXT,
+    duration_ms INTEGER, speaker_count INTEGER,
+    scoring_method TEXT,   -- 'claude' | 'transformers' | 'heuristic'
+    source TEXT,           -- 'manual' | 'teams_auto' | 'bot'
+    success INTEGER DEFAULT 0,
+    error_message TEXT,
+    quality_warnings TEXT  -- JSON array of validation warnings
+  );
 `);
 
 // ── Helper: resolve speaker aliases for an org ────────────────────────────────

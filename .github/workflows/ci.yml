@@ -44,3 +44,21 @@ jobs:
         run: npm run build
         env:
           CI: 'true'
+
+  dbt-parse:
+    name: dbt — parse
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dbt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dbt + Athena adapter
+        run: pip install dbt-core dbt-athena-community
+      - name: Install dbt packages
+        run: dbt deps
+      - name: Validate project
+        run: dbt parse --profiles-dir .

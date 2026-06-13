@@ -1,148 +1,286 @@
 import React, { useState } from 'react';
-import { NavLink, Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  LayoutDashboard, User, Video, Users, BarChart2,
+  Search, Settings, LogOut,
+} from 'lucide-react';
 import { setToken } from '../api';
 import { useAuth, isRole } from '../hooks/useAuth';
 
-const NAV = [
-  {
-    to: '/dashboard', label: 'Dashboard', roles: null,
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>,
-  },
-  {
-    to: '/me', label: 'My Profile', roles: ['employee', 'manager'],
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
-  },
-  {
-    to: '/analyze', label: 'Analyze', roles: null,
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
-  },
-  {
-    to: '/meetings', label: 'Meetings', roles: null,
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
-  },
-  {
-    to: '/calendar', label: 'Calendar', roles: null,
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
-  },
-  {
-    to: '/team', label: 'Team', roles: ['manager', 'hr', 'admin'],
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
-  },
-  {
-    to: '/org/roster', label: 'Org Roster', roles: ['hr', 'admin'],
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
-  },
-  {
-    to: '/reports', label: 'Reports', roles: ['manager', 'hr', 'admin'],
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
-  },
-  {
-    to: '/intelligence', label: 'Intelligence', roles: null,
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
-  },
-  {
-    to: '/settings', label: 'Settings', roles: null,
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
-  },
+// ── Nav definitions ───────────────────────────────────────────────────────────
+const NAV_MAIN = [
+  { to: '/dashboard',    label: 'Dashboard',    icon: LayoutDashboard, roles: null },
+  { to: '/me',           label: 'My Profile',   icon: User,            roles: ['employee', 'manager'] },
+  { to: '/meetings',     label: 'Meetings',     icon: Video,           roles: null },
+  { to: '/team',         label: 'Team',         icon: Users,           roles: ['manager', 'hr', 'admin'] },
+  { to: '/reports',      label: 'Reports',      icon: BarChart2,       roles: ['manager', 'hr', 'admin'] },
+  { to: '/intelligence', label: 'Intelligence', icon: Search,          roles: null },
 ];
-
-const ROLE_BADGE = {
-  admin: 'badge-role-admin',
-  hr: 'badge-role-hr',
-  manager: 'badge-role-manager',
-  employee: 'badge-role-employee',
-};
+const NAV_SETTINGS = [
+  { to: '/settings', label: 'Settings', icon: Settings, roles: null },
+];
 
 function initials(name) {
   if (!name) return 'U';
   return name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 }
 
+// ── NavItem ───────────────────────────────────────────────────────────────────
+function NavItem({ item, expanded, active }) {
+  const Icon = item.icon;
+  return (
+    <Link to={item.to} title={!expanded ? item.label : undefined}>
+      <div
+        className={`relative flex items-center px-3 py-2.5 rounded-lg transition-colors duration-150 cursor-pointer ${
+          active
+            ? 'bg-amber-500/15 text-amber-300'
+            : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/5'
+        }`}
+      >
+        {/* Active left-bar indicator — only when collapsed */}
+        {active && !expanded && (
+          <motion.div
+            layoutId="activeIndicator"
+            className="absolute left-0 w-0.5 h-5 bg-amber-400 rounded-r-full"
+          />
+        )}
+        <Icon size={18} className={`shrink-0 ${active ? 'text-amber-400' : ''}`} />
+        <motion.span
+          animate={{ opacity: expanded ? 1 : 0 }}
+          transition={{ duration: 0.15 }}
+          className="ml-3 text-sm font-medium whitespace-nowrap overflow-hidden"
+        >
+          {item.label}
+        </motion.span>
+      </div>
+    </Link>
+  );
+}
+
+// ── AppShell ──────────────────────────────────────────────────────────────────
 function AppShell({ children, title, subtitle }) {
-  const navigate = useNavigate();
-  const auth = useAuth();
+  const navigate     = useNavigate();
+  const location     = useLocation();
+  const auth         = useAuth();
+  const [expanded,   setExpanded]   = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const logout = () => { setToken(null); navigate('/'); };
 
-  const visibleNav = NAV.filter((item) => {
-    if (!item.roles) return true;
-    return isRole(auth, ...item.roles);
-  });
+  const filterNav = (items) =>
+    items.filter((item) => !item.roles || isRole(auth, ...item.roles));
+
+  const mainNav     = filterNav(NAV_MAIN);
+  const settingsNav = filterNav(NAV_SETTINGS);
+
+  const isActive = (to) =>
+    location.pathname === to || location.pathname.startsWith(to + '/');
 
   return (
     <div className="min-h-screen bg-bg flex">
-      {/* Sidebar */}
-      <aside className={`fixed inset-y-0 left-0 w-60 bg-surface border-r border-white/[0.06] flex flex-col z-30 transform transition-transform duration-200 ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+
+      {/* ── Desktop sidebar (hover-expand) ──────────────────────────────────── */}
+      <motion.aside
+        animate={{ width: expanded ? 240 : 64 }}
+        transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+        onMouseEnter={() => setExpanded(true)}
+        onMouseLeave={() => setExpanded(false)}
+        className="hidden lg:flex fixed left-0 top-0 h-screen bg-[#0c0a08]
+                   border-r border-white/[0.06] flex-col overflow-hidden z-40"
+      >
         {/* Logo */}
-        <div className="px-5 py-5 border-b border-white/[0.06]">
-          <Link to="/dashboard" className="text-lg font-bold text-white no-underline">
-            <span className="text-accent">Meeting</span>Metric
-          </Link>
+        <div className="h-14 flex items-center px-4 border-b border-white/[0.06] shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30
+                          flex items-center justify-center shrink-0">
+            <span className="text-amber-400 font-bold text-sm">M</span>
+          </div>
+          <motion.span
+            animate={{ opacity: expanded ? 1 : 0, x: expanded ? 0 : -8 }}
+            transition={{ duration: 0.15 }}
+            className="ml-2.5 font-semibold text-white text-sm whitespace-nowrap"
+          >
+            MeetingMetric
+          </motion.span>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-0.5">
-          {visibleNav.map((item) => (
-            <NavLink
+        {/* Main nav */}
+        <nav className="flex-1 py-3 space-y-0.5 px-2">
+          {mainNav.map((item) => (
+            <NavItem
               key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `nav-item ${isActive ? 'nav-item-active' : 'nav-item-inactive'}`
-              }
-              onClick={() => setMobileOpen(false)}
-            >
-              <span className="flex-shrink-0">{item.icon}</span>
-              <span>{item.label}</span>
-            </NavLink>
+              item={item}
+              expanded={expanded}
+              active={isActive(item.to)}
+            />
           ))}
         </nav>
 
-        {/* User info */}
-        {auth && (
-          <div className="border-t border-white/[0.06] px-4 py-4">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-8 h-8 rounded-full bg-accent-dim flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                {initials(auth.fullName || auth.email)}
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm text-white truncate">{auth.fullName || auth.email}</p>
-                <span className={`badge ${ROLE_BADGE[auth.role] || 'badge-role-employee'}`}>{auth.role}</span>
-              </div>
-            </div>
+        {/* Settings + user card */}
+        <div className="px-2 pb-3 pt-3 space-y-0.5 border-t border-white/[0.06] shrink-0">
+          {settingsNav.map((item) => (
+            <NavItem
+              key={item.to}
+              item={item}
+              expanded={expanded}
+              active={isActive(item.to)}
+            />
+          ))}
+
+          {auth && (
             <button
               type="button"
               onClick={logout}
-              className="nav-item nav-item-inactive w-full"
+              title={!expanded ? 'Log out' : undefined}
+              className="w-full flex items-center gap-2.5 p-2 mt-1 rounded-lg
+                         hover:bg-white/5 cursor-pointer transition-colors group"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-              <span>Log out</span>
+              <div className="w-7 h-7 rounded-full bg-amber-500/20 border border-amber-500/30
+                              flex items-center justify-center text-xs font-medium
+                              text-amber-300 shrink-0">
+                {initials(auth.fullName || auth.email)}
+              </div>
+              <motion.div
+                animate={{ opacity: expanded ? 1 : 0 }}
+                transition={{ duration: 0.15 }}
+                className="flex-1 min-w-0 text-left overflow-hidden"
+              >
+                <p className="text-xs font-medium text-zinc-300 truncate whitespace-nowrap">
+                  {auth.fullName || auth.email}
+                </p>
+                <p className="text-[10px] text-zinc-600 capitalize whitespace-nowrap">
+                  {auth.role}
+                </p>
+              </motion.div>
+              <motion.div
+                animate={{ opacity: expanded ? 1 : 0 }}
+                transition={{ duration: 0.15 }}
+                className="shrink-0"
+              >
+                <LogOut
+                  size={12}
+                  className="text-zinc-600 group-hover:text-zinc-400 transition-colors"
+                />
+              </motion.div>
             </button>
-          </div>
-        )}
-      </aside>
+          )}
+        </div>
+      </motion.aside>
 
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div className="fixed inset-0 bg-black/50 z-20 lg:hidden" onClick={() => setMobileOpen(false)} />
-      )}
+      {/* ── Mobile sidebar ──────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {mobileOpen && (
+          <>
+            <motion.div
+              key="mobile-overlay"
+              className="fixed inset-0 bg-black/50 z-30 lg:hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setMobileOpen(false)}
+            />
+            <motion.aside
+              key="mobile-sidebar"
+              initial={{ x: -240 }}
+              animate={{ x: 0 }}
+              exit={{ x: -240 }}
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              className="fixed left-0 top-0 h-screen w-60 bg-[#0c0a08]
+                         border-r border-white/[0.06] flex flex-col z-40 lg:hidden"
+            >
+              {/* Logo */}
+              <div className="h-14 flex items-center px-4 border-b border-white/[0.06] shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/30
+                                flex items-center justify-center shrink-0">
+                  <span className="text-amber-400 font-bold text-sm">M</span>
+                </div>
+                <span className="ml-2.5 font-semibold text-white text-sm">MeetingMetric</span>
+              </div>
+
+              {/* Nav */}
+              <nav className="flex-1 py-3 space-y-0.5 px-2 overflow-y-auto">
+                {[...mainNav, ...settingsNav].map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(item.to);
+                  return (
+                    <Link
+                      key={item.to}
+                      to={item.to}
+                      onClick={() => setMobileOpen(false)}
+                    >
+                      <div
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg
+                          transition-colors duration-150 ${
+                            active
+                              ? 'bg-amber-500/15 text-amber-300'
+                              : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/5'
+                          }`}
+                      >
+                        <Icon
+                          size={18}
+                          className={`shrink-0 ${active ? 'text-amber-400' : ''}`}
+                        />
+                        <span className="text-sm font-medium">{item.label}</span>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </nav>
+
+              {/* User card */}
+              {auth && (
+                <div className="p-2 border-t border-white/[0.06] shrink-0">
+                  <button
+                    type="button"
+                    onClick={logout}
+                    className="w-full flex items-center gap-2.5 p-2 rounded-lg
+                               hover:bg-white/5 cursor-pointer transition-colors group"
+                  >
+                    <div className="w-7 h-7 rounded-full bg-amber-500/20 border border-amber-500/30
+                                    flex items-center justify-center text-xs font-medium
+                                    text-amber-300 shrink-0">
+                      {initials(auth.fullName || auth.email)}
+                    </div>
+                    <div className="flex-1 min-w-0 text-left">
+                      <p className="text-xs font-medium text-zinc-300 truncate">
+                        {auth.fullName || auth.email}
+                      </p>
+                      <p className="text-[10px] text-zinc-600 capitalize">{auth.role}</p>
+                    </div>
+                    <LogOut
+                      size={12}
+                      className="text-zinc-600 group-hover:text-zinc-400 shrink-0 transition-colors"
+                    />
+                  </button>
+                </div>
+              )}
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Mobile hamburger */}
       <button
         type="button"
         onClick={() => setMobileOpen(!mobileOpen)}
-        className="fixed top-4 left-4 z-40 lg:hidden p-2 rounded-lg bg-surface border border-white/10"
+        className="fixed top-4 left-4 z-50 lg:hidden p-2 rounded-lg
+                   bg-[#0c0a08] border border-white/10"
         aria-label="Toggle navigation"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2">
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <line x1="3" y1="12" x2="21" y2="12"/>
+          <line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
       </button>
 
-      {/* Main content */}
-      <main className="flex-1 lg:ml-60 min-h-screen">
-        {/* Page header */}
+      {/* ── Main content ────────────────────────────────────────────────────── */}
+      {/* ml-16 always — sidebar overlays on hover expand */}
+      <main className="flex-1 ml-0 lg:ml-16 min-h-screen">
         {(title || subtitle) && (
           <div className="px-6 md:px-8 pt-6 pb-2">
-            {title && <h1 className="text-2xl font-bold text-white">{title}</h1>}
+            {title    && <h1 className="text-2xl font-bold text-white">{title}</h1>}
             {subtitle && <p className="text-muted text-sm mt-0.5">{subtitle}</p>}
           </div>
         )}

@@ -1,5 +1,12 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { Suspense } from 'react';
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+} from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { Toaster } from 'react-hot-toast';
 import LandingPage from './components/LandingPage';
 import AuthPage from './components/AuthPage';
@@ -16,29 +23,74 @@ import ReportsPage from './components/ReportsPage';
 import MyProfilePage from './components/MyProfilePage';
 import OrgRosterPage from './components/OrgRosterPage';
 import { PrivateRoute, RoleRoute } from './components/PrivateRoute';
+import FloatingOrbs from './components/three/FloatingOrbs';
+import CursorGlow from './components/CursorGlow';
+
+function AppRoutes() {
+  const location = useLocation();
+
+  return (
+    // Keyed motion.div fades each page IN on mount. No AnimatePresence / mode="wait",
+    // so the new page always renders immediately — nothing to hang on an exit.
+    <motion.div
+      key={location.pathname}
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+      style={{ width: '100%' }}
+    >
+        <Routes location={location}>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<AuthPage />} />
+          <Route path="/register" element={<AuthPage />} />
+          <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+          <Route path="/calendar" element={<PrivateRoute><CalendarPage /></PrivateRoute>} />
+          <Route path="/meetings" element={<PrivateRoute><MeetingsListPage /></PrivateRoute>} />
+          <Route path="/meeting/:id" element={<PrivateRoute><MeetingDetail /></PrivateRoute>} />
+          <Route path="/projects" element={<PrivateRoute><ProjectsPage /></PrivateRoute>} />
+          <Route path="/team" element={<PrivateRoute><TeamPage /></PrivateRoute>} />
+          <Route path="/analyze" element={<PrivateRoute><AnalyzePage /></PrivateRoute>} />
+          <Route path="/intelligence" element={<PrivateRoute><IntelligencePage /></PrivateRoute>} />
+          <Route path="/reports" element={<PrivateRoute><ReportsPage /></PrivateRoute>} />
+          <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
+          <Route path="/me" element={<PrivateRoute><MyProfilePage /></PrivateRoute>} />
+          <Route
+            path="/org/roster"
+            element={
+              <PrivateRoute>
+                <RoleRoute roles={['hr', 'admin']}>
+                  <OrgRosterPage />
+                </RoleRoute>
+              </PrivateRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </motion.div>
+  );
+}
 
 function App() {
   return (
     <Router basename={process.env.PUBLIC_URL}>
-      <Toaster position="bottom-right" toastOptions={{ style: { background: '#1e2028', color: '#e8eaed', border: '1px solid rgba(255,255,255,0.1)' } }} />
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<AuthPage />} />
-        <Route path="/register" element={<AuthPage />} />
-        <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
-        <Route path="/calendar" element={<PrivateRoute><CalendarPage /></PrivateRoute>} />
-        <Route path="/meetings" element={<PrivateRoute><MeetingsListPage /></PrivateRoute>} />
-        <Route path="/meeting/:id" element={<PrivateRoute><MeetingDetail /></PrivateRoute>} />
-        <Route path="/projects" element={<PrivateRoute><ProjectsPage /></PrivateRoute>} />
-        <Route path="/team" element={<PrivateRoute><TeamPage /></PrivateRoute>} />
-        <Route path="/analyze" element={<PrivateRoute><AnalyzePage /></PrivateRoute>} />
-        <Route path="/intelligence" element={<PrivateRoute><IntelligencePage /></PrivateRoute>} />
-        <Route path="/reports" element={<PrivateRoute><ReportsPage /></PrivateRoute>} />
-        <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
-        <Route path="/me" element={<PrivateRoute><MyProfilePage /></PrivateRoute>} />
-        <Route path="/org/roster" element={<PrivateRoute><RoleRoute roles={['hr', 'admin']}><OrgRosterPage /></RoleRoute></PrivateRoute>} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      {/* Global cinematic background — persists across all pages */}
+      <Suspense fallback={null}>
+        <FloatingOrbs />
+      </Suspense>
+      <CursorGlow />
+
+      <Toaster
+        position="bottom-right"
+        toastOptions={{
+          style: {
+            background: '#1e2028',
+            color: '#e8eaed',
+            border: '1px solid rgba(255,255,255,0.1)',
+          },
+        }}
+      />
+
+      <AppRoutes />
     </Router>
   );
 }

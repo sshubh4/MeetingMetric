@@ -1,0 +1,55 @@
+version: 2
+
+models:
+  - name: speaker_weekly_performance
+    description: Average scores per speaker per ISO week.
+    columns:
+      - name: speaker_name
+        tests: [not_null]
+      - name: avg_engagement
+        description: Weekly average engagement (0-1)
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  - name: org_meeting_health
+    description: >
+      Monthly org-level meeting health — volume, efficiency, engagement, and
+      the share of unhealthy meetings.
+    columns:
+      - name: org_id
+        tests: [not_null]
+      - name: avg_efficiency
+        description: Monthly average efficiency (0-1)
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  - name: meeting_efficiency_distribution
+    description: Meeting counts in efficiency quartile buckets per org per month.
+    columns:
+      - name: efficiency_bucket
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['0.00-0.25', '0.25-0.50', '0.50-0.75', '0.75-1.00']
+
+  - name: top_performers
+    description: >
+      Speakers ranked per org by composite score over the trailing 90 days
+      (minimum 3 meetings).
+    columns:
+      - name: composite_score
+        description: Mean of the five score dimensions (0-1)
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: org_rank
+        tests: [not_null]

@@ -7,27 +7,200 @@
   * { box-sizing: border-box; }
 }
 
+/* ── Reduced motion (CRITICAL — respects accessibility preferences) ─────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Focus states — amber ring for keyboard navigation ──────────────────────── */
+:focus-visible {
+  outline: 2px solid rgba(251, 191, 36, 0.65);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ── Custom scrollbars ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar          { width: 4px; height: 4px; }
+::-webkit-scrollbar-track    { background: transparent; }
+::-webkit-scrollbar-thumb    { background: rgba(255,255,255,0.1); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+
+/* ── Button press micro-interaction ────────────────────────────────────────── */
+button,
+[role="button"],
+a.btn-primary,
+a.btn-ghost,
+a.btn-danger {
+  transition: transform 0.1s ease, box-shadow 0.1s ease, opacity 0.1s ease;
+}
+button:active,
+[role="button"]:active,
+a.btn-primary:active,
+a.btn-ghost:active,
+a.btn-danger:active {
+  transform: scale(0.96);
+}
+
+/* ── Landing page blob / glow animations ────────────────────────────────────── */
+@keyframes blob-drift-1 {
+  0%   { transform: translate(0px, 0px)    scale(1);    }
+  33%  { transform: translate(60px, -40px) scale(1.08); }
+  66%  { transform: translate(-30px, 30px) scale(0.95); }
+  100% { transform: translate(0px, 0px)    scale(1);    }
+}
+@keyframes blob-drift-2 {
+  0%   { transform: translate(0px, 0px)    scale(1);    }
+  33%  { transform: translate(-50px, 30px) scale(1.05); }
+  66%  { transform: translate(40px, -50px) scale(0.92); }
+  100% { transform: translate(0px, 0px)    scale(1);    }
+}
+@keyframes blob-drift-3 {
+  0%   { transform: translate(0px, 0px)   scale(1);   }
+  50%  { transform: translate(35px, 55px) scale(1.1); }
+  100% { transform: translate(0px, 0px)   scale(1);   }
+}
+@keyframes glow-pulse-1 {
+  0%, 100% { opacity: 0.18; transform: scale(1);    }
+  50%       { opacity: 0.30; transform: scale(1.12); }
+}
+@keyframes glow-pulse-2 {
+  0%, 100% { opacity: 0.12; transform: scale(1);    }
+  50%       { opacity: 0.22; transform: scale(1.08); }
+}
+
+.landing-blob-1 { animation: blob-drift-1 18s ease-in-out infinite; }
+.landing-blob-2 { animation: blob-drift-2 22s ease-in-out infinite; }
+.landing-blob-3 { animation: blob-drift-3 26s ease-in-out infinite; }
+.landing-glow-1 { animation: glow-pulse-1  8s ease-in-out infinite; }
+.landing-glow-2 { animation: glow-pulse-2 11s ease-in-out infinite 2s; }
+
+/* ── Noise texture overlay (landing page) ───────────────────────────────────── */
+.noise-bg {
+  position: relative;
+}
+.noise-bg::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.4;
+}
+
+/* ── Mount reveal (landing below-fold sections — reliable, no scroll dep) ───── */
+@keyframes reveal-rise {
+  from { opacity: 0; transform: translateY(28px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.reveal-rise {
+  animation: reveal-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── Cinematic cloud atmosphere (landing hero) ──────────────────────────────── */
+.atmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 50% 8%, rgba(10,8,18,0) 0%, rgba(8,6,14,0.55) 62%, #060509 100%),
+    linear-gradient(180deg, #0a0712 0%, #0c0918 48%, #070510 100%);
+}
+
+/* Soft drifting cloud masses — SVG fractal noise tinted + blurred */
+.cloud-layer {
+  position: fixed;
+  inset: -12%;
+  z-index: 0;
+  pointer-events: none;
+  background-size: cover;
+  background-position: center;
+  mix-blend-mode: screen;
+  will-change: transform;
+}
+.cloud-layer-1 {
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1000' height='1000'%3E%3Cfilter id='cl' x='-20%25' y='-20%25' width='140%25' height='140%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.009' numOctaves='4' seed='8' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0.5 0 0 0 0 0.35 0 0 0 0 0.95 0 0 0 1.3 -0.45'/%3E%3CfeGaussianBlur stdDeviation='10'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23cl)'/%3E%3C/svg%3E");
+  animation: cloud-drift-1 55s ease-in-out infinite alternate;
+}
+.cloud-layer-2 {
+  opacity: 0.32;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1100' height='1100'%3E%3Cfilter id='cl2' x='-20%25' y='-20%25' width='140%25' height='140%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.006' numOctaves='4' seed='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0.1 0 0 0 0 0.6 0 0 0 0 0.55 0 0 0 1.2 -0.5'/%3E%3CfeGaussianBlur stdDeviation='14'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23cl2)'/%3E%3C/svg%3E");
+  animation: cloud-drift-2 80s ease-in-out infinite alternate;
+}
+
+/* Horizon dawn-glow */
+.atmosphere-glow {
+  position: fixed;
+  left: 50%;
+  top: 42%;
+  width: 130vw;
+  height: 70vh;
+  transform: translate(-50%, -50%);
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center,
+              rgba(124,58,237,0.28) 0%,
+              rgba(99,102,241,0.14) 32%,
+              rgba(20,184,166,0.07) 55%,
+              transparent 72%);
+  filter: blur(30px);
+}
+
+@keyframes cloud-drift-1 {
+  0%   { transform: translate3d(0, 0, 0)      scale(1.18); }
+  100% { transform: translate3d(-5%, -3%, 0)  scale(1.18); }
+}
+@keyframes cloud-drift-2 {
+  0%   { transform: translate3d(0, 0, 0)     scale(1.22); }
+  100% { transform: translate3d(6%, 4%, 0)   scale(1.22); }
+}
+
+/* ── Scroll reveal (fade + rise), plays on mount ────────────────────────────── */
+@keyframes reveal-rise {
+  0%   { opacity: 0; transform: translateY(28px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.reveal-rise {
+  animation: reveal-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── Utilities ──────────────────────────────────────────────────────────────── */
+@layer utilities {
+  .font-cursive { font-family: 'Dancing Script', cursive; }
+}
+
+/* ── Components ─────────────────────────────────────────────────────────────── */
 @layer components {
-  .card { @apply bg-surface border border-white/[0.08] rounded-xl p-5; }
-  .btn-primary { @apply bg-accent-dim hover:bg-accent text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
-  .btn-ghost { @apply border border-white/10 hover:border-white/20 text-slate-300 hover:text-white text-sm px-4 py-2 rounded-lg transition-colors; }
-  .btn-danger { @apply bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm px-4 py-2 rounded-lg transition-colors border border-red-600/20; }
-  .input { @apply bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-slate-200 text-sm placeholder-muted focus:outline-none focus:border-accent/50 w-full; }
-  .select { @apply bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-accent/50 w-full; }
-  .badge { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium; }
-  .badge-role-admin { @apply bg-purple-500/20 text-purple-300 border border-purple-500/20; }
-  .badge-role-hr { @apply bg-cyan-500/20 text-cyan-300 border border-cyan-500/20; }
-  .badge-role-manager { @apply bg-blue-500/20 text-blue-300 border border-blue-500/20; }
+  .card          { @apply bg-surface border border-white/[0.08] rounded-xl p-5; }
+  .btn-primary   { @apply bg-accent-dim hover:bg-accent text-zinc-900 text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-ghost     { @apply border border-white/10 hover:border-white/20 text-slate-300 hover:text-white text-sm px-4 py-2 rounded-lg transition-colors; }
+  .btn-danger    { @apply bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm px-4 py-2 rounded-lg transition-colors border border-red-600/20; }
+  .input         { @apply bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-slate-200 text-sm placeholder-muted focus:outline-none focus:border-accent/50 w-full; }
+  .select        { @apply bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-accent/50 w-full; }
+  .badge         { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium; }
+  .badge-role-admin    { @apply bg-purple-500/20 text-purple-300 border border-purple-500/20; }
+  .badge-role-hr       { @apply bg-cyan-500/20   text-cyan-300   border border-cyan-500/20; }
+  .badge-role-manager  { @apply bg-blue-500/20   text-blue-300   border border-blue-500/20; }
   .badge-role-employee { @apply bg-white/10 text-slate-400 border border-white/10; }
-  .stat-card { @apply card flex flex-col gap-1; }
-  .stat-val { @apply text-3xl font-bold text-white; }
-  .stat-label { @apply text-xs text-muted uppercase tracking-wider; }
-  .dim-bar { @apply h-1.5 rounded-full bg-white/10 overflow-hidden; }
-  .dim-bar-fill { @apply h-full rounded-full bg-accent transition-all; }
-  .table-base { @apply w-full text-sm; }
+  .stat-card     { @apply card flex flex-col gap-1; }
+  .stat-val      { @apply text-3xl font-bold text-white; }
+  .stat-label    { @apply text-xs text-muted uppercase tracking-wider; }
+  .dim-bar       { @apply h-1.5 rounded-full bg-white/10 overflow-hidden; }
+  .dim-bar-fill  { @apply h-full rounded-full bg-accent transition-all; }
+  .table-base    { @apply w-full text-sm; }
   .table-base th { @apply text-left text-xs text-muted uppercase tracking-wider pb-3 font-medium; }
   .table-base td { @apply py-3 border-t border-white/[0.05]; }
-  .nav-item { @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors; }
-  .nav-item-active { @apply bg-white/10 text-white; }
+  .nav-item          { @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150; }
+  .nav-item-active   { @apply bg-amber-500/10 text-white; }
   .nav-item-inactive { @apply text-muted hover:text-white hover:bg-white/5; }
 }

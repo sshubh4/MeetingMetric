@@ -25,3 +25,6 @@ out/
 # OS / logs
 .DS_Store
 *.log
+
+# local data lake output
+data-lake/

@@ -1,0 +1,83 @@
+version: 2
+
+models:
+  - name: stg_speaker_results
+    description: >
+      One row per speaker per meeting, cleaned from the silver lake layer.
+      Scores are normalized to [0,1]; meeting_ts prefers scheduled_at and
+      falls back to created_at.
+    columns:
+      - name: meeting_id
+        description: Transactional meeting id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_meetings')
+                field: meeting_id
+      - name: speaker_name
+        description: Speaker display name from the transcript
+        tests:
+          - not_null
+      - name: engagement
+        description: How actively the speaker participated (0-1)
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: sentiment
+        description: How constructive/positive their tone was (0-1)
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: collaboration
+        description: How well they built on others' ideas (0-1)
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: initiative
+        description: How much they drove topics and proposed actions (0-1)
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: clarity
+        description: How clear and structured their points were (0-1)
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: talk_ratio
+        description: Share of total meeting words spoken by this speaker (0-1)
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  - name: stg_meetings
+    description: One row per meeting, deduplicated from silver speaker records.
+    columns:
+      - name: meeting_id
+        description: Transactional meeting id
+        tests:
+          - not_null
+          - unique
+      - name: efficiency_score
+        description: Composite meeting efficiency (0-1)
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: org_id
+        description: Organization id
+        tests:
+          - not_null

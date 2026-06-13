@@ -1,0 +1,21 @@
+# dbt-athena-community profile. All values come from env vars — no
+# credentials are stored in this repo. AWS auth itself uses the standard
+# credential chain (env vars / ~/.aws / instance profile).
+meetingmetric:
+  target: dev
+  outputs:
+    dev:
+      type: athena
+      region_name: "{{ env_var('AWS_REGION', 'us-east-1') }}"
+      # Where Athena writes query results / dbt staging data
+      s3_staging_dir: "{{ env_var('DBT_ATHENA_S3_STAGING_DIR', 's3://meetingmetric-data-lake/athena-results/') }}"
+      # Where dbt-created tables store their data
+      s3_data_dir: "{{ env_var('DBT_ATHENA_S3_DATA_DIR', 's3://meetingmetric-data-lake/dbt/') }}"
+      # Glue catalog database that holds the dbt models. Deliberately NOT
+      # meetingmetric_db: the Glue ETL's gold external tables live there and
+      # share names with the marts (e.g. speaker_weekly_performance).
+      schema: "{{ env_var('DBT_ATHENA_SCHEMA', 'meetingmetric_marts') }}"
+      # Athena data catalog
+      database: "{{ env_var('DBT_ATHENA_DATABASE', 'awsdatacatalog') }}"
+      work_group: "{{ env_var('DBT_ATHENA_WORKGROUP', 'meetingmetric') }}"
+      threads: 4

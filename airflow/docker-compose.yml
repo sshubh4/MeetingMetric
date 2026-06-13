@@ -1,0 +1,38 @@
+# Local Airflow standalone for the MeetingMetric daily pipeline.
+# Single container: webserver + scheduler + SQLite metadata DB (dev only).
+#
+#   cd airflow
+#   cp .env.example .env   # fill in AWS placeholders
+#   docker compose up
+#
+# UI at http://localhost:8080 — the admin password is printed in the logs
+# (search for "standalone | Login with username").
+services:
+  airflow:
+    image: apache/airflow:2.10.4-python3.12
+    command: standalone
+    ports:
+      - "8080:8080"
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      # AWS + pipeline configuration (placeholders — set real values in .env)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-YOUR_AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-YOUR_AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-meetingmetric-data-lake}
+      GLUE_JOB_NAME: ${GLUE_JOB_NAME:-meetingmetric-gold-etl}
+      DBT_PROJECT_DIR: /opt/airflow/dbt
+      DBT_ATHENA_S3_STAGING_DIR: ${DBT_ATHENA_S3_STAGING_DIR:-s3://meetingmetric-data-lake/athena-results/}
+      DBT_ATHENA_S3_DATA_DIR: ${DBT_ATHENA_S3_DATA_DIR:-s3://meetingmetric-data-lake/dbt/}
+      DBT_ATHENA_SCHEMA: ${DBT_ATHENA_SCHEMA:-meetingmetric_marts}
+      # dbt + boto3 installed at container start (dev convenience; bake an
+      # image for anything beyond local use)
+      _PIP_ADDITIONAL_REQUIREMENTS: "boto3 dbt-core dbt-athena-community"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ../dbt:/opt/airflow/dbt
+      - airflow-data:/opt/airflow
+
+volumes:
+  airflow-data:

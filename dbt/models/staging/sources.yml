@@ -1,0 +1,21 @@
+version: 2
+
+sources:
+  - name: meetingmetric_lake
+    description: >
+      Tables created in the Glue data catalog by the silver-layer crawler
+      (aws/glue_crawler_setup.py). The 'silver' table is one flat record per
+      speaker per meeting.
+    schema: meetingmetric_db
+    tables:
+      - name: silver
+        description: Flat per-speaker meeting records crawled from s3://.../silver/
+        columns:
+          - name: meeting_id
+            description: Transactional meeting id (SQLite primary key)
+          - name: org_id
+            description: Organization id
+          - name: speaker_name
+            description: Display name of the speaker as parsed from the transcript
+          - name: score_engagement
+            description: Engagement score in [0,1]

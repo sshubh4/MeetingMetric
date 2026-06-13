@@ -190,22 +190,26 @@ function round2(x) {
   return Math.round(Math.max(0, Math.min(1, x)) * 100) / 100;
 }
 
-async function scoreDimensions(text, talkRatio, turnCount) {
+async function scoreDimensionsDetailed(text, talkRatio, turnCount) {
   if (ANTHROPIC_KEY) {
     try {
-      return await scoreDimensionsClaude(text);
+      return { scores: await scoreDimensionsClaude(text), method: 'claude' };
     } catch (e) {
       console.warn('Claude scoring failed, falling back:', e.message);
     }
   }
   if (USE_ML) {
     try {
-      return await scoreDimensionsML(text);
+      return { scores: await scoreDimensionsML(text), method: 'transformers' };
     } catch (e) {
       console.warn('ML scoring failed, using heuristics:', e.message);
     }
   }
-  return heuristicScores(text, talkRatio, turnCount);
+  return { scores: heuristicScores(text, talkRatio, turnCount), method: 'heuristic' };
+}
+
+async function scoreDimensions(text, talkRatio, turnCount) {
+  return (await scoreDimensionsDetailed(text, talkRatio, turnCount)).scores;
 }
 
 /* ── Heuristic coaching fallback ─────────────────────────── */
@@ -248,6 +252,7 @@ function buildCoaching(name, scores, talkRatio, teamAvgTalkRatio, breakdown, tur
 module.exports = {
   DIMENSION_LABELS,
   scoreDimensions,
+  scoreDimensionsDetailed,
   heuristicScores,
   buildCoaching,
   buildCoachingClaude,
